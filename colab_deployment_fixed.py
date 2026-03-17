@@ -248,6 +248,8 @@ if check_fastapi_health():
     tunnel_url = start_cloudflare_tunnel(8000)
 
     if tunnel_url:
+        with open("/tmp/tunnel_url.txt", "w") as _f:
+            _f.write(tunnel_url)
         print("\n🎉 API available at:")
         print(f"🌐 Public URL:      {tunnel_url}")
         print(f"📚 API Docs:        {tunnel_url}/docs")
