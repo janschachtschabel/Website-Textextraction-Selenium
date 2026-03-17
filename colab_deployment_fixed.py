@@ -1,258 +1,224 @@
 # ======================================================================================
-# Korrigiertes Script für Google Colab - Volltextextraktion Selenium MD API
-# Repository: https://github.com/janschachtschabel/Volltextextraktion-Selenium-MD
+# Google Colab Deployment — Website Textextraction Selenium API
+# Repository: https://github.com/janschachtschabel/Website-Textextraction-Selenium
+#
+# Colab resources: ~12 GB RAM, 2 vCPUs
+# Configuration: Performance Setting — 2 workers, Selenium pool 2→4, no LLM (Presidio local)
 # ======================================================================================
 
-# Umgebungsvariablen aus der .env Datei setzen und Openai API Key aus Colab Secrets ziehen
+print("🚀 Website Textextraction Selenium — Google Colab Deployment")
+print("=" * 60)
 
+import functools
 import os
-from google.colab import userdata
+import re
 import subprocess
 import sys
-import re
 import threading
 import time
-import requests
-from IPython.display import clear_output
 
-# 1) Feste Defaults direkt setzen (alles außer dem Key)
+import requests
+
+# Set environment variables
+# Performance Setting: 2 workers, pool 2→4, cache 30 min
+# For low-resource runtimes use Safe Setting instead:
+#   UVICORN_WORKERS=1, SELENIUM_POOL_SIZE=1, SELENIUM_MAX_POOL_SIZE=4,
+#   RESULT_CACHE_TTL=300, RESULT_CACHE_MAX_SIZE=200
 os.environ.update({
-    "PORT":"8000",
-    "HOST":"0.0.0.0",
-    "LLM_BASE_URL":"https://api.openai.com/v1",
-    "LLM_MODEL":"gpt-5-mini",
-    "DEFAULT_TIMEOUT_SECONDS":"120",
-    "DEFAULT_RETRIES":"1",
-    "DEFAULT_HEADLESS":"true",
-    "DEFAULT_STEALTH":"true",
-    "DEFAULT_JS_AUTO_WAIT":"true",
-    "DEFAULT_MAX_BYTES":"10485760",
-    "DEFAULT_USER_AGENT":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
-    "SELENIUM_POOL_SIZE":"4",
-    "DEFAULT_JS_STRATEGY":"speed",
+    "HOST":                      "0.0.0.0",
+    "PORT":                      "8000",
+    "LOG_LEVEL":                 "INFO",
+    "DEFAULT_MODE":              "auto",
+    "DEFAULT_JS_STRATEGY":       "speed",
+    "DEFAULT_TIMEOUT_SECONDS":   "120",
+    "DEFAULT_RETRIES":           "1",
+    "DEFAULT_HEADLESS":          "true",
+    "DEFAULT_STEALTH":           "true",
+    "DEFAULT_JS_AUTO_WAIT":      "true",
+    "DEFAULT_MAX_BYTES":         "10485760",
+    # Performance Setting: 2 workers × 4 Chrome = 8 parallel JS renders
+    # Load-test result: sweet-spot conc=4 at ~3 s latency, 0 errors
+    "SELENIUM_POOL_SIZE":        "2",   # 4 Chrome at startup (2 per worker)
+    "SELENIUM_MAX_POOL_SIZE":    "4",   # max. 8 Chrome (4 per worker)
+    "SELENIUM_SCALE_THRESHOLD":  "0.8",
+    "UVICORN_WORKERS":           "2",   # 2 workers; each warms its pool independently
+    "MAX_QUEUE_SIZE":            "30",
+    "QUEUE_TIMEOUT_SECONDS":     "90",
+    "HTML_CONVERTER":            "trafilatura",
+    "TRAFILATURA_CLEAN_MARKDOWN":"true",
+    "RESULT_CACHE_TTL":          "1800", # 30 min – Colab content rarely changes
+    "RESULT_CACHE_MAX_SIZE":     "500",  # 500 MB
+    "ALLOW_INSECURE_SSL":        "false",
+    "SSRF_PROTECTION":           "true",
+    "GLOBAL_RATE_LIMIT_RPS":     "0",
+    "DEFAULT_DOMAIN_RATE_LIMIT_RPS": "0",
+    "MEDIA_CONVERSION_POLICY":   "skip",
 })
 
-# 2) Key sicher aus Colab Secrets ziehen (ohne Anzeige)
-key = userdata.get("OPENAI_API_KEY")
-if key:
-    os.environ["OPENAI_API_KEY"] = key
+# Install system packages
+print("📦 Installing system packages...")
+subprocess.run("sudo apt-get update -qq && sudo apt-get install -y git", shell=True, check=True)
+
+# Install Chrome — skip if already present, otherwise try simple apt-get first
+print("🌐 Installing Google Chrome...")
+_chrome_present = subprocess.run(
+    ["which", "google-chrome-stable"], capture_output=True
+).returncode == 0 or subprocess.run(
+    ["which", "google-chrome"], capture_output=True
+).returncode == 0
+
+if _chrome_present:
+    print("✅ Google Chrome already installed — skipping")
 else:
-    # Optionaler Fallback ohne Anzeige:
-    from getpass import getpass
-    os.environ["OPENAI_API_KEY"] = getpass("OpenAI API key (wird nicht angezeigt): ")
+    # Simple apt-get install (works in most Colab runtimes)
+    _r = subprocess.run(
+        "sudo apt-get update -qq && sudo apt-get install -y google-chrome-stable",
+        shell=True,
+    )
+    if _r.returncode != 0:
+        # Fallback: add Google's signing key + repo manually
+        print("   apt-get failed, adding Google repo manually...")
+        subprocess.run(
+            "curl -fsSL https://dl.google.com/linux/linux_signing_key.pub "
+            "| sudo gpg --dearmor --yes "
+            "-o /usr/share/keyrings/google-chrome-keyring.gpg && "
+            "echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] "
+            "http://dl.google.com/linux/chrome/deb/ stable main' "
+            "| sudo tee /etc/apt/sources.list.d/google-chrome.list > /dev/null && "
+            "sudo apt-get update -qq && sudo apt-get install -y google-chrome-stable",
+            shell=True, check=True,
+        )
+    print("✅ Google Chrome installed")
 
-# 3) Prüfen, ohne den Key zu leaken
-print("OPENAI_API_KEY geladen:", bool(os.environ.get("OPENAI_API_KEY")))
-
-# Git installieren
-subprocess.run("sudo apt-get update && sudo apt-get install -y git", shell=True, check=True)
-
-# Chrome installieren (für Selenium)
-subprocess.run("wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -", shell=True, check=True)
-subprocess.run("sudo sh -c 'echo \"deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main\" >> /etc/apt/sources.list.d/google-chrome.list'", shell=True, check=True)
-subprocess.run("sudo apt-get update", shell=True, check=True)
-subprocess.run("sudo apt-get install -y google-chrome-stable", shell=True, check=True)
-
-# Cloudflare Tunnel installieren
+# Install Cloudflare Tunnel
+print("🌐 Installing Cloudflare Tunnel...")
 subprocess.run("wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb", shell=True, check=True)
 subprocess.run("sudo dpkg -i cloudflared-linux-amd64.deb", shell=True, check=True)
 
-# KORRIGIERTE Repository URL und Pfad
-subprocess.run("git clone https://github.com/janschachtschabel/Volltextextraktion-Selenium-MD.git /content/Volltextextraktion-Selenium-MD", shell=True, check=True)
-os.chdir('/content/Volltextextraktion-Selenium-MD')
+# Clone repository
+print("📥 Cloning repository...")
+subprocess.run("git clone https://github.com/janschachtschabel/Website-Textextraction-Selenium.git /content/Website-Textextraction-Selenium", shell=True, check=True)
+os.chdir('/content/Website-Textextraction-Selenium')
+sys.path.insert(0, '/content/Website-Textextraction-Selenium')
 
-# Dependencies installieren
-subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], check=True)
+# Install Python dependencies (explicit list — no pyproject.toml required)
+print("📦 Installing Python dependencies...")
+_PACKAGES = [
+    "fastapi[standard]>=0.135.1",
+    "uvicorn[standard]>=0.42.0",
+    "httpx[http2]>=0.28.1",
+    "selenium>=4.41.0",
+    "webdriver-manager>=4.0.2",
+    "markitdown[all]>=0.1.5",
+    "trafilatura>=2.0.0",
+    "beautifulsoup4>=4.14.3",
+    "lxml>=5.3.0",
+    "python-dotenv>=1.0.1",
+    "tqdm>=4.66.0",
+    "cachetools>=7.0.0",
+    "loguru>=0.7.3",
+    "truststore>=0.10.0",
+    "aiolimiter>=1.1.0",
+    "diskcache>=5.6.0",
+    "presidio-analyzer>=2.2.0",
+    "presidio-anonymizer>=2.2.0",
+    "spacy>=3.7.0",
+]
+subprocess.run([sys.executable, "-m", "pip", "install", "-q"] + _PACKAGES, check=True)
+print("✅ Python dependencies installed")
 
-# Chrome-Konfiguration für Google Colab patchen (Python-basiert)
-import os
-import sys
-sys.path.insert(0, '/content/Volltextextraktion-Selenium-MD')
+# Download spaCy models for Presidio anonymisation
+print("🧠 Downloading spaCy models for PII anonymisation (one-time ~500 MB)...")
+subprocess.run([sys.executable, "-m", "spacy", "download", "de_core_news_lg", "-q"], check=True)
+subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_lg", "-q"], check=True)
+print("✅ spaCy models loaded")
 
-# Chrome-Patch direkt als Python-Code definieren
-chrome_patch_code = '''
-import os
-import sys
-sys.path.insert(0, '/content/Volltextextraktion-Selenium-MD')
+# =============================================================================
+# CHROME PATCH — set binary_location only
+# All other flags (--no-sandbox, --disable-dev-shm-usage, etc.) are already
+# included in js_fetcher._create_driver and must not be set again.
+# =============================================================================
 
-def patch_js_fetcher():
+def _patch_chrome_for_colab():
+    """Injects binary_location into every Options call made by js_fetcher."""
     try:
-        from app import js_fetcher
         from selenium.webdriver.chrome.options import Options
-        from selenium.webdriver.chrome.service import Service
-        
-        def colab_create_driver(proxy=None, user_agent=None, page_load_strategy='normal'):
-            options = Options()
-            options.binary_location = "/usr/bin/google-chrome"
-            options.add_argument("--headless=new")
-            options.add_argument("--disable-dev-shm-usage")
-            options.add_argument("--no-sandbox")
-            options.add_argument("--disable-blink-features=AutomationControlled")
-            options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            options.add_experimental_option('useAutomationExtension', False)
-            
-            # Alle anderen Optionen aus dem Original übernehmen
-            options.add_argument("--disable-logging")
-            options.add_argument("--log-level=3")
-            options.add_argument("--disable-gpu")
-            options.add_argument("--disable-software-rasterizer")
-            options.add_argument("--disable-background-timer-throttling")
-            options.add_argument("--disable-backgrounding-occluded-windows")
-            options.add_argument("--disable-renderer-backgrounding")
-            options.add_argument("--disable-features=TranslateUI,BlinkGenPropertyTrees,VizDisplayCompositor")
-            options.add_argument("--disable-ipc-flooding-protection")
-            options.add_argument("--disable-default-apps")
-            options.add_argument("--disable-sync")
-            options.add_argument("--disable-background-networking")
-            options.add_argument("--remote-debugging-port=0")
-            options.add_argument("--disable-web-security")
-            options.add_argument("--disable-hang-monitor")
-            options.add_argument("--disable-prompt-on-repost")
-            options.add_argument("--disable-domain-reliability")
-            options.add_argument("--disable-component-extensions-with-background-pages")
-            options.add_argument("--disable-client-side-phishing-detection")
-            options.add_argument("--disable-popup-blocking")
-            options.add_argument("--disable-translate")
-            options.add_argument("--disable-notifications")
-            options.add_argument("--disable-permissions-api")
-            options.add_argument("--memory-pressure-off")
-            options.add_argument("--max_old_space_size=4096")
-            options.add_argument("--aggressive-cache-discard")
-            options.add_argument("--window-size=1920,1080")
-            options.add_argument("--start-maximized")
-            options.add_argument("--disable-extensions")
-            options.add_argument("--disable-plugins-discovery")
-            options.add_argument("--disable-plugins")
-            options.add_argument("--disable-images")
-            options.add_argument("--disable-javascript-harmony-shipping")
-            
-            if user_agent:
-                options.add_argument(f"--user-agent={user_agent}")
-            else:
-                options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            
-            if proxy and proxy.strip() and proxy.strip().lower() != "string":
-                options.add_argument(f"--proxy-server={proxy}")
-                options.add_argument("--ignore-ssl-errors-on-proxy")
-                options.add_argument("--ignore-certificate-errors-spki-list")
-                options.add_argument("--ignore-certificate-errors")
-            
-            try:
-                if page_load_strategy in ('eager', 'normal'):
-                    options.page_load_strategy = page_load_strategy
-            except Exception:
-                pass
-            
-            # ChromeDriver Service - verwende System-Installation
-            from webdriver_manager.chrome import ChromeDriverManager
-            service = Service(ChromeDriverManager().install())
-            
-            from selenium import webdriver
-            driver = webdriver.Chrome(service=service, options=options)
-            
-            try:
-                setattr(driver, "_strategy_key", 'eager' if page_load_strategy == 'eager' else 'normal')
-            except Exception:
-                pass
-            
-            # Stealth script ausführen (vereinfacht für Colab)
-            try:
-                driver.execute_script("""
-                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                """)
-            except:
-                pass
-            
-            return driver
-        
-        # Patch anwenden
-        js_fetcher._create_driver = colab_create_driver
-        print("✅ Chrome-Konfiguration für Google Colab gepatcht")
-        
+        _orig_init = Options.__init__
+
+        @functools.wraps(_orig_init)
+        def _patched_init(self, *args, **kwargs):
+            _orig_init(self, *args, **kwargs)
+            self.binary_location = "/usr/bin/google-chrome"
+
+        Options.__init__ = _patched_init
+        print("✅ Chrome binary_location set for Colab (/usr/bin/google-chrome)")
     except Exception as e:
-        print(f"⚠️ Chrome-Patch Fehler: {e}")
+        print(f"⚠️ Chrome patch failed: {e}")
 
-patch_js_fetcher()
-'''
-
-# Chrome-Patch-Datei schreiben
-with open('/content/Volltextextraktion-Selenium-MD/colab_chrome_patch.py', 'w') as f:
-    f.write(chrome_patch_code)
+os.environ["PYTHONPATH"] = "/content/Website-Textextraction-Selenium"
+os.chdir("/content/Website-Textextraction-Selenium")
 
 # =============================================================================
-# ENVIRONMENT CONFIGURATION - KORRIGIERT
+# HEALTH CHECK FUNCTIONS
 # =============================================================================
 
-# Korrigierte Environment-Variablen für Volltextextraktion-Selenium-MD
-os.environ["PYTHONPATH"] = "/content/Volltextextraktion-Selenium-MD"
-
-# Chrome Binary Pfad für Google Colab
-os.environ["CHROME_BIN"] = "/usr/bin/google-chrome"
-os.environ["CHROMEDRIVER_PATH"] = "/usr/bin/chromedriver"
-
-# Selenium Konfiguration für Google Colab
-os.environ["GOOGLE_COLAB"] = "true"  # Flag für Colab-spezifische Anpassungen
-
-# Optional: Logging configuration
-os.environ["LOG_LEVEL"] = "INFO"
-
-# Working directory setzen
-os.chdir("/content/Volltextextraktion-Selenium-MD")
-
-# =============================================================================
-# HEALTH CHECK FUNCTIONS - KORRIGIERT
-# =============================================================================
-
-def check_fastapi_health(port=8000, max_attempts=30):
-    """Prüft, ob FastAPI erfolgreich gestartet ist"""
+def check_fastapi_health(port=8000, max_attempts=40):
+    """Waits until /health reports status=ok (Selenium pool must be ready)."""
     for attempt in range(max_attempts):
         try:
-            # KORRIGIERTER Health-Check - verwendet root endpoint
-            response = requests.get(f"http://localhost:{port}/", timeout=2)
+            response = requests.get(f"http://localhost:{port}/health", timeout=3)
             if response.status_code == 200:
-                print(f"✅ Volltextextraktion-Selenium-MD API ist bereit! (Versuch {attempt + 1})")
-                return True
+                data = response.json()
+                if data.get("status") in ("ok", "starting"):
+                    pools_ready = not data.get("pools_warming", True)
+                    if pools_ready:
+                        print(f"✅ API ready — Selenium pools initialised (attempt {attempt + 1})")
+                        return True
+                    else:
+                        print(f"⏳ API running, Selenium pools still warming... (attempt {attempt + 1}/{max_attempts})")
+                        time.sleep(3)
+                        continue
         except requests.exceptions.RequestException:
             pass
 
-        print(f"⏳ Warte auf Volltextextraktion-Selenium-MD API... (Versuch {attempt + 1}/{max_attempts})")
-        time.sleep(2)
+        print(f"⏳ Waiting for API to start... (attempt {attempt + 1}/{max_attempts})")
+        time.sleep(3)
 
     return False
 
-def run_fastapi_verbose():
-    """Startet Volltextextraktion-Selenium-MD API mit ausführlicher Ausgabe"""
-    print("🚀 Starte Volltextextraktion-Selenium-MD API mit detaillierter Ausgabe...")
+def run_fastapi():
+    """Starts FastAPI (2 workers, no --reload in Colab)."""
+    print("🚀 Starting API server (Performance Setting: 2 workers, pool 2→4)...")
+    os.chdir("/content/Website-Textextraction-Selenium")
+    _patch_chrome_for_colab()
 
-    # Sicherstellen, dass wir im richtigen Verzeichnis sind
-    os.chdir("/content/Volltextextraktion-Selenium-MD")
-
-    # Chrome-Patch vor dem Start anwenden
-    try:
-        exec(open('/content/Volltextextraktion-Selenium-MD/colab_chrome_patch.py').read())
-    except Exception as e:
-        print(f"⚠️ Chrome-Patch konnte nicht angewendet werden: {e}")
-
-    # KORRIGIERTER STARTBEFEHL für Volltextextraktion-Selenium-MD Repository
     process = subprocess.Popen(
-        ["uvicorn", "app.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"],
+        ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
-        universal_newlines=True
     )
 
-    # Ausgabe in Echtzeit anzeigen
     for line in process.stdout:
         print(line.strip())
-        if "Uvicorn running on" in line or "Application startup complete" in line:
-            print("✅ Volltextextraktion-Selenium-MD API erfolgreich gestartet!")
+        if "Application startup complete" in line:
+            print("✅ API server ready")
             break
 
+    # Drain remaining pipe output in background to prevent buffer-full deadlock.
+    # Without this, uvicorn workers block on stdout writes and stop serving requests.
+    def _drain_stdout():
+        try:
+            for _ in process.stdout:
+                pass
+        except Exception:
+            pass
+    threading.Thread(target=_drain_stdout, daemon=True).start()
+
 def start_cloudflare_tunnel(port):
-    """Startet Cloudflare Tunnel und extrahiert URL"""
-    print(f"🌐 Starte Cloudflare Tunnel für Port {port}...")
+    """Starts Cloudflare Tunnel and extracts the public URL."""
+    print(f"🌐 Starting Cloudflare Tunnel for port {port}...")
 
     process = subprocess.Popen(
         ["cloudflared", "tunnel", "--url", f"http://localhost:{port}"],
@@ -274,66 +240,69 @@ def start_cloudflare_tunnel(port):
 # MAIN DEPLOYMENT SCRIPT
 # =============================================================================
 
-print("🚀 Volltextextraktion-Selenium-MD API - Google Colab Deployment")
-print("📦 Repository: https://github.com/janschachtschabel/Volltextextraktion-Selenium-MD")
-print("=" * 60)
-
-# Schritt 1: FastAPI in separatem Thread starten
-print("🔧 Starte Volltextextraktion-Selenium-MD API Server...")
-fastapi_thread = threading.Thread(target=run_fastapi_verbose)
+# Step 1: start FastAPI in a separate thread
+print("🔧 Starting API server (Performance Setting: 2 workers, Selenium pool 2→4)...")
+fastapi_thread = threading.Thread(target=run_fastapi)
 fastapi_thread.daemon = True
 fastapi_thread.start()
 
-# Schritt 2: Warten und Health Check
-print("⏳ Warte auf API Bereitschaft...")
-time.sleep(15)  # Längere Wartezeit für Selenium-Setup
+# Step 2: wait and health-check (Selenium pool needs ~15–30 s)
+print("⏳ Waiting for API + Selenium pool...")
+time.sleep(20)
 
 if check_fastapi_health():
-    print("✅ Volltextextraktion-Selenium-MD API läuft erfolgreich!")
+    print("✅ Website-Textextraction-Selenium API is running!")
 
-    # Schritt 3: Cloudflare Tunnel starten
+    # Step 3: start Cloudflare Tunnel
     tunnel_url = start_cloudflare_tunnel(8000)
 
     if tunnel_url:
-        print(f"\n🎉 SUCCESS! Volltextextraktion-Selenium-MD API ist verfügbar unter:")
-        print(f"🌐 Public URL: {tunnel_url}")
-        print(f"📚 API Docs: {tunnel_url}/docs")
-        print(f"🔍 ReDoc: {tunnel_url}/redoc")
-        print(f"❤️ Health: {tunnel_url}/")
-        print(f"🔗 Crawl Endpoint: {tunnel_url}/crawl")
-        
-        print(f"\n📋 Beispiel API-Aufruf:")
+        print("\n🎉 API available at:")
+        print(f"🌐 Public URL:      {tunnel_url}")
+        print(f"📚 API Docs:        {tunnel_url}/docs")
+        print(f"❤️  Health:          {tunnel_url}/health")
+        print(f"📊 Stats:           {tunnel_url}/stats")
+        print(f"🔗 Crawl Endpoint:  {tunnel_url}/crawl")
+
+        print("\n📋 Example requests:")
         print(f"""
+# Simple crawl (auto mode, with screenshot)
 curl -X POST "{tunnel_url}/crawl" \\
   -H "Content-Type: application/json" \\
-  -d '{{
-    "url": "https://example.com",
-    "mode": "auto",
-    "js_strategy": "speed"
-  }}'
+  -d '{{"url": "https://example.com", "mode": "auto", "screenshot": true}}'
+
+# PII anonymisation (local, no API key)
+curl -X POST "{tunnel_url}/crawl" \\
+  -H "Content-Type: application/json" \\
+  -d '{{"url": "https://example.com", "anonymize": true, "anonymize_language": "en"}}'
+
+# Set per-domain rate limit
+curl -X POST "{tunnel_url}/crawl" \\
+  -H "Content-Type: application/json" \\
+  -d '{{"url": "https://example.com", "crawl_rate_limit_rps": 0.5}}'
         """)
 
     else:
-        print("❌ Cloudflare Tunnel konnte nicht gestartet werden")
+        print("❌ Cloudflare Tunnel could not be started")
 
 else:
-    print("❌ Volltextextraktion-Selenium-MD API konnte nicht gestartet werden!")
-    print("🔍 Debugging-Informationen:")
+    print("❌ Website-Textextraction-Selenium API failed to start!")
+    print("🔍 Debugging information:")
 
-    # Directory-Check
-    print("\n📁 Verzeichnis-Check:")
-    subprocess.run(["ls", "-la", "/content/Volltextextraktion-Selenium-MD/"], check=False)
+    # Directory check
+    print("\n📁 Directory check:")
+    subprocess.run(["ls", "-la", "/content/Website-Textextraction-Selenium/"], check=False)
 
-    print("\n📁 App Module Check:")
-    subprocess.run(["ls", "-la", "/content/Volltextextraktion-Selenium-MD/app/"], check=False)
+    print("\n📁 App module check:")
+    subprocess.run(["ls", "-la", "/content/Website-Textextraction-Selenium/app/"], check=False)
 
-    # Dependencies-Check
-    print("\n📦 Dependencies-Check:")
-    subprocess.run('pip list | grep -E "(fastapi|uvicorn|selenium|markitdown)"', shell=True, check=False)
+    # Dependencies check
+    print("\n📦 Dependencies check:")
+    subprocess.run([sys.executable, "-m", "pip", "show", "fastapi", "uvicorn", "selenium", "markitdown", "presidio-analyzer"], check=False)
 
-    # Manual start attempt
-    print("\n🔧 Manueller Start-Versuch:")
-    subprocess.run([sys.executable, "-c", "from app.main import app; print('✅ App import erfolgreich')"], check=False, cwd="/content/Volltextextraktion-Selenium-MD")
+    # App import test
+    print("\n🔧 App import test:")
+    subprocess.run([sys.executable, "-c", "from app.main import app; print('\u2705 App import successful')"], check=False, cwd="/content/Website-Textextraction-Selenium")
 
 print("\n" + "=" * 60)
-print("🏁 Deployment-Script beendet")
+print("🏁 Deployment script finished")
