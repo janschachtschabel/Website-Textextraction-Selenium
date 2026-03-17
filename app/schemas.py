@@ -1,19 +1,20 @@
 from __future__ import annotations
 
-from typing import Literal, Optional, List
-from pydantic import BaseModel, Field, HttpUrl, ConfigDict
+from typing import List, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 
 class CrawlRequest(BaseModel):
     """
-    Request-Schema für das Crawlen von Webseiten mit automatischer Markdown-Konvertierung.
-    
-    Unterstützt drei Modi:
-    - 'fast': Schneller HTTP-Abruf für statische Inhalte
-    - 'js': Browser-Rendering für JavaScript-abhängige Seiten
-    - 'auto': Pre-Flight-Analyse entscheidet zwischen HTTP_ONLY, JS_LIGHT oder Spezialpfaden
+    Request schema for crawling web pages with automatic Markdown conversion.
+
+    Supports three modes:
+    - 'fast': Fast HTTP fetch for static content
+    - 'js': Browser rendering for JavaScript-heavy pages
+    - 'auto': Pre-flight analysis selects between HTTP_ONLY, JS_LIGHT or special paths
     """
-    # OpenAPI Beispiel (Standardvorgaben im Docs-Endpoint)
+    # OpenAPI example (default values shown in /docs)
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -25,215 +26,327 @@ class CrawlRequest(BaseModel):
                 "media_conversion_policy": "skip",
                 "allow_insecure_ssl": True,
                 "extract_links": False,
-                "llm_postprocess": False,
-                "llm_anonymize": False,
-                "llm_clean_prompt": None,
+                "anonymize": False,
+                "anonymize_language": "de",
                 "retries": 2,
                 "timeout_ms": 30000,
-                "max_bytes": 1048576
+                "max_bytes": 1048576,
+                "force_refresh": False,
             }
         }
     )
     
     url: HttpUrl = Field(
-        description="Die zu crawlende URL",
+        description="The URL to crawl",
         examples=["https://example.com", "https://docs.python.org/3/tutorial/"]
     )
 
-    # HTML/Markdown Konvertierung (Schema-basierte Overrides)
-    html_converter: Optional[Literal["trafilatura", "markitdown", "bs4"]] = Field(
+    # HTML/Markdown conversion (per-request schema overrides)
+    html_converter: Literal["trafilatura", "markitdown", "bs4"] | None = Field(
         default=None,
         description=(
-            "HTML→Markdown Konverter für diesen Request.\n"
-            "• trafilatura (Default in .env): Robuste Kerninhalts-Extraktion\n"
-            "• markitdown: Volle HTML→Markdown-Konvertierung\n"
-            "• bs4: Einfache Text-Extraktion (nur HTML)"
+            "HTML→Markdown converter for this request.\n"
+            "• trafilatura (default in .env): Robust main-content extraction\n"
+            "• markitdown: Full HTML→Markdown conversion\n"
+            "• bs4: Simple text extraction (HTML only)"
         ),
         examples=[None, "trafilatura", "markitdown", "bs4"],
     )
 
-    trafilatura_clean_markdown: Optional[bool] = Field(
+    trafilatura_clean_markdown: bool | None = Field(
         default=None,
         description=(
-            "Trafilatura Ausgabe-Modus: True=bereinigtes Markdown (Hauptinhalt), False=roh (html2txt).\n"
-            "Wenn None, wird der .env-Default (TRAFILATURA_CLEAN_MARKDOWN) verwendet."
+            "Trafilatura output mode: True=clean Markdown (main content only), False=raw (html2txt).\n"
+            "If None, the .env default (TRAFILATURA_CLEAN_MARKDOWN) is used."
         ),
         examples=[None, True, False],
     )
 
-    media_conversion_policy: Optional[Literal["skip", "metadata", "full", "none"]] = Field(
+    media_conversion_policy: Literal["skip", "metadata", "full", "none"] | None = Field(
         default=None,
         description=(
-            "Medien-Konvertierung für Audio/Video:\n"
-            "• skip (Default): keine Konvertierung, nur Platzhalter-Hinweis\n"
-            "• metadata: nur ffprobe-Metadaten als JSON\n"
-            "• full: vollständige Konvertierung (langsam)\n"
-            "• none: gar keine Konvertierungstexte (minimaler Platzhalter)"
+            "Media conversion policy for audio/video:\n"
+            "• skip (default): no conversion, short placeholder text\n"
+            "• metadata: ffprobe metadata as JSON only\n"
+            "• full: full conversion via markitdown/ffmpeg (slow)\n"
+            "• none: no output at all for media files"
         ),
         examples=[None, "skip", "metadata", "full", "none"],
     )
 
-    allow_insecure_ssl: Optional[bool] = Field(
+    allow_insecure_ssl: bool | None = Field(
         default=None,
         description=(
-            "SSL-Validierung für diesen Request deaktivieren (verify=false).\n"
-            "Wenn None, wird der .env-Default (ALLOW_INSECURE_SSL) verwendet."
+            "Disable SSL validation for this request (verify=false).\n"
+            "If None, the .env default (ALLOW_INSECURE_SSL) is used."
         ),
         examples=[None, True, False],
     )
     
     mode: Literal["fast", "js", "auto"] = Field(
         default="auto", 
-        description="""Crawl-Modus auswählen:
-        
-• fast: Schneller HTTP-Abruf mit httpx
-  - Für statische HTML-Seiten, PDFs, Office-Dokumente
-  - HTTP/2, automatische Redirects, Cookie-Persistenz
-  - Schnell und ressourcenschonend
-  
-• js: Browser-Rendering mit Selenium Chrome
-  - Für JavaScript-abhängige Single-Page-Applications
-  - Wartet auf DOM-Inhalte, klickt Cookie-Banner weg
-  - Langsamer, aber vollständiges Browser-Verhalten
+        description="""Select crawl mode:
 
-• auto: Pre-Flight-Analyse (httpx + HTML-Parsing) wählt automatisch die beste Strategie
-  - HTTP_ONLY: direktes HTML (kein Selenium)
-  - JS_LIGHT: Selenium mit aggressivem "speed"-Profil (Assets blocken, kurze Waits)
-  - Spezialfälle: PDF/RSS/YouTube werden ohne Selenium behandelt""",
+• fast: Fast HTTP fetch via httpx
+  - For static HTML pages, PDFs, Office documents
+  - HTTP/2, automatic redirects, cookie persistence
+  - Fast and resource-efficient
+
+• js: Browser rendering via Selenium Chrome
+  - For JavaScript-heavy single-page applications
+  - Waits for DOM content, dismisses cookie banners
+  - Slower, but full browser behaviour
+
+• auto: Pre-flight analysis (httpx + HTML parsing) selects the best strategy automatically
+  - HTTP_ONLY: direct HTML (no Selenium)
+  - JS_LIGHT: Selenium with aggressive "speed" profile (block assets, short waits)
+  - Special cases: PDF/RSS/YouTube handled without Selenium""",
         examples=["auto", "fast", "js"]
     )
     
     js_strategy: Literal["accuracy", "speed"] = Field(
         default="speed",
-        description="""Strategie für den JS-Modus (Selenium):
-        
-• speed (Standard): aggressive Beschleunigung mit kurzen Caps und parallelen Waits (best effort)
-• accuracy: maximale Qualität/Robustheit; leicht aggressivere Caps als zuvor
+        description="""Strategy for JS mode (Selenium):
+
+• speed (default): aggressive acceleration with short caps and parallel waits (best effort)
+• accuracy: maximum quality/robustness; slightly more conservative caps
 """,
         examples=["accuracy", "speed"]
     )
     
     timeout_ms: int = Field(
         default=180_000, ge=1000, le=600_000,
-        description="""Timeout in Millisekunden (1-600 Sekunden):
-        
-• **fast-Modus**: HTTP-Request-Timeout
-• **js-Modus**: Browser-Navigation + Warte-Zeit für Inhalte
+        description="""Timeout in milliseconds (1–600 seconds):
 
-Empfohlene Werte:
-- Schnelle Seiten: 30.000ms (30s)
-- Normale Seiten: 180.000ms (3min) 
-- Langsame JS-Apps: 300.000ms (5min)""",
+• **fast mode**: HTTP request timeout
+• **js mode**: Browser navigation + content wait time
+
+Recommended values:
+- Fast pages: 30,000 ms (30 s)
+- Normal pages: 180,000 ms (3 min)
+- Slow JS apps: 300,000 ms (5 min)""",
         examples=[30000, 180000, 300000]
     )
     
     retries: int = Field(
         default=2, ge=0, le=10, 
-        description="""Anzahl Wiederholungsversuche bei Fehlern:
-        
-• 0: Keine Wiederholung
-• 1-3: Empfohlen für normale Seiten  
-• 4-10: Für instabile/überlastete Server
+        description="""Number of retry attempts on failure:
 
-Wiederholung erfolgt bei: Netzwerkfehlern, Timeouts, 5xx-Serverfehler""",
+• 0: No retry
+• 1–3: Recommended for normal pages
+• 4–10: For unstable or overloaded servers
+
+Retried on: network errors, timeouts, 5xx server errors""",
         examples=[0, 2, 5]
     )
     
-    proxy: Optional[str] = Field(
+    proxy: str | None = Field(
         default=None, 
-        description="""Optionaler Proxy-Server:
-        
-Unterstützte Formate:
+        description="""Optional proxy server:
+
+Supported formats:
 • HTTP: `http://proxy.example.com:8080`
-• HTTPS: `https://proxy.example.com:8080` 
-• Mit Auth: `http://user:pass@proxy.example.com:8080`
+• HTTPS: `https://proxy.example.com:8080`
+• With auth: `http://user:pass@proxy.example.com:8080`
 • SOCKS: `socks5://proxy.example.com:1080`
 
-**Hinweis**: Wird ignoriert wenn leer oder der Platzhalter "string" verwendet wird""",
+**Note**: Ignored when empty or the placeholder value "string" is used""",
         examples=[None, "http://proxy.example.com:8080", "http://user:pass@proxy.example.com:8080"]
     )
     
     max_bytes: int = Field(
         default=10 * 1024 * 1024, ge=1024, le=100 * 1024 * 1024,
-        description="""Maximale Dateigröße in Bytes:
-        
-Verhindert zu große Downloads und schützt vor Speicher-Problemen.
+        description="""Maximum response size in bytes:
 
-Empfohlene Werte:
-• Kleine Seiten: 1.048.576 (1MB)
-• Standard: 10.485.760 (10MB)
-• Große Dokumente: 52.428.800 (50MB)
+Prevents oversized downloads and protects against memory issues.
 
-**Hinweis**: Download stoppt bei Erreichen des Limits""",
+Recommended values:
+• Small pages: 1,048,576 (1 MB)
+• Default: 10,485,760 (10 MB)
+• Large documents: 52,428,800 (50 MB)
+
+**Note**: Download stops when the limit is reached""",
         examples=[1048576, 10485760, 52428800]
     )
     
     extract_links: bool = Field(
         default=False, 
-        description="""Link-Extraktion für HTML-Inhalte:
-        
-Bei aktivierter Option werden alle Links der Seite extrahiert und kategorisiert:
+        description="""Link extraction for HTML content:
 
-**Kategorien:**
-• content: Inhaltliche Links (Artikel, Ressourcen)
-• nav: Navigation (Menü, Breadcrumbs)  
-• social: Social Media Links
-• auth: Login/Registrierung
-• legal: Impressum, Datenschutz
-• search: Suchfunktionen
-• contact: Kontakt-Informationen
-• download: Download-Links
-• anchor: Anker-Links (#section)
-• other: Sonstige Links
+When enabled, all links on the page are extracted and categorised:
 
-**Zusätzliche Infos**: URL, Link-Text, internal/external""",
+**Categories:**
+• content: Content links (articles, resources)
+• nav: Navigation (menus, breadcrumbs)
+• social: Social media links
+• auth: Login/registration
+• legal: Imprint, privacy policy
+• search: Search functions
+• contact: Contact information
+• download: Download links
+• anchor: Anchor links (#section)
+• other: Miscellaneous links
+
+**Additional info**: URL, link text, internal/external""",
         examples=[False, True]
     )
 
-    # Optional LLM-Nachbearbeitung
-    llm_postprocess: bool = Field(
-        default=False, 
-        description="""Strukturelle Bereinigung & Fokussierung auf Inhalte aktivieren (LLM):
-• Entfernt Navigation/Ads/Banner
-• Struktur verbessert Markdown & Fokus auf Kerninhalte
-• Optional: Klassifizierung
+    screenshot: bool = Field(
+        default=True,
+        description="""Capture a viewport screenshot of the rendered page (1920×1080 px, PNG as Base64).
+Only available when Selenium is active (mode=js or mode=auto with JS path).
+For mode=fast or auto+HTTP_ONLY, screenshot_base64 in the response will be null.""",
+        examples=[True, False],
+    )
 
-Voraussetzung: LLM_API_KEY in .env""",
-        examples=[False, True]
+    anonymize: bool = Field(
+        default=False,
+        description="""PII anonymisation via Presidio (local, no LLM, no external API call).
+Detected entities (names, emails, phone numbers, addresses …) are replaced
+by placeholders, e.g. <PERSON>, <EMAIL_ADDRESS>.
+The anonymised text replaces the markdown field in the response.""",
+        examples=[False, True],
     )
-    
-    llm_anonymize: bool = Field(
-        default=False, 
-        description="""Personenbezogene Daten entfernen/ersetzen (PII-Anonymisierung).
-Nur aktiv, wenn llm_postprocess=true.""",
-        examples=[False, True]
+    anonymize_language: str = Field(
+        default="de",
+        description="Language for PII detection: de = German, en = English",
+        examples=["de", "en"],
     )
-    
-    llm_clean_prompt: Optional[str] = Field(
-        default=None, 
-        description="""Custom-Anweisungen für die LLM-Bereinigung (optional), z. B.:
-• "Entferne Datumsangaben"
-• "Fokussiere nur auf Code-Beispiele"
-• "Fasse in 3 Sätzen zusammen"
 
-Nur aktiv, wenn llm_postprocess=true.""",
-        examples=[
-            None,
-            "Entferne alle Datumsangaben",
-            "Fokussiere nur auf Code-Beispiele", 
-            "Fasse in 3 Sätzen zusammen"
-        ]
+    crawl_rate_limit_rps: float | None = Field(
+        default=None,
+        ge=0.0, le=100.0,
+        description=(
+            "Max requests per second to the target domain of this request.\n"
+            "• None / not set: server default (DEFAULT_DOMAIN_RATE_LIMIT_RPS) applies\n"
+            "• 0.0: disable per-domain limit for this request\n"
+            "• > 0: overrides the server default for this domain"
+        ),
+        examples=[None, 0.0, 0.5, 1.0, 2.0],
     )
+
+    force_refresh: bool = Field(
+        default=False,
+        description=(
+            "Bypass the cache for this URL and fetch a fresh copy.\n"
+            "• False (default): return cached result if available\n"
+            "• True: skip cache lookup; freshly crawled content is stored in the cache\n"
+            "Useful when a page has been updated since the last crawl."
+        ),
+        examples=[False, True],
+    )
+
+
+class BatchCrawlRequest(BaseModel):
+    """Batch crawl for up to 50 URLs with shared settings.
+
+    All parameters except `urls` and `max_concurrency` behave identically
+    to the single `/crawl` endpoint and apply to every URL in the batch.
+    """
+    urls: List[HttpUrl] = Field(
+        ..., min_length=1, max_length=50,
+        description="List of URLs to crawl (1–50 entries)",
+    )
+    mode: Literal["fast", "js", "auto"] = Field(
+        default="auto",
+        description="Crawl mode for all URLs: auto (recommended), fast (HTTP only), js (Selenium)",
+    )
+    js_strategy: Literal["accuracy", "speed"] = Field(
+        default="speed",
+        description="Selenium strategy: speed (fast, best-effort) or accuracy (more robust)",
+    )
+    html_converter: Literal["trafilatura", "markitdown", "bs4"] | None = Field(
+        default=None,
+        description="HTML→Markdown converter: trafilatura (main content), markitdown (full), bs4 (simple). None = server default",
+    )
+    trafilatura_clean_markdown: bool | None = Field(
+        default=None,
+        description="Trafilatura output: True = clean (main content), False = raw, None = server default",
+    )
+    media_conversion_policy: Literal["skip", "metadata", "full", "none"] | None = Field(
+        default=None,
+        description="Audio/video handling: skip (placeholder), metadata (ffprobe info), full (conversion), none (no output)",
+    )
+    allow_insecure_ssl: bool | None = Field(
+        default=None,
+        description="Disable SSL validation (True = accept insecure certificates). None = server default",
+    )
+    timeout_ms: int = Field(
+        default=60_000, ge=1000, le=600_000,
+        description="Timeout per URL in milliseconds (default: 60 s). Increase for js mode if needed",
+    )
+    retries: int = Field(
+        default=1, ge=0, le=5,
+        description="Retry attempts per URL on network errors, timeouts or 5xx responses",
+    )
+    proxy: str | None = Field(
+        default=None,
+        description="Proxy for all URLs: http://host:port, https://host:port, socks5://host:port or with auth http://user:pass@host:port",
+    )
+    max_bytes: int = Field(
+        default=5 * 1024 * 1024, ge=1024, le=100 * 1024 * 1024,
+        description="Maximum download size per URL in bytes (default: 5 MB). Protects against excessive memory usage",
+    )
+    extract_links: bool = Field(
+        default=False,
+        description="Extract and categorise links for all URLs (content, nav, social, auth, legal, download …)",
+    )
+    screenshot: bool = Field(
+        default=True,
+        description="Capture viewport screenshot (PNG as Base64). Only when Selenium is active (mode=js or auto+JS path)",
+    )
+    anonymize: bool = Field(
+        default=False,
+        description="PII anonymisation via Presidio for all URLs: names, emails, phone numbers etc. replaced by placeholders",
+    )
+    anonymize_language: str = Field(
+        default="de",
+        description="Language for PII detection: de (German) or en (English)",
+    )
+    crawl_rate_limit_rps: float | None = Field(
+        default=None, ge=0.0, le=100.0,
+        description="Max requests/s per target domain for all URLs. None = server default, 0 = no limit",
+    )
+    force_refresh: bool = Field(
+        default=False,
+        description=(
+            "Bypass the cache for all URLs and fetch fresh copies.\n"
+            "• False (default): return cached results if available\n"
+            "• True: skip cache lookup; freshly crawled content is stored in the cache"
+        ),
+        examples=[False, True],
+    )
+    max_concurrency: int = Field(
+        default=3, ge=1, le=10,
+        description="Number of concurrent crawls within this batch (1–10). Higher values speed up the batch but increase server load",
+    )
+
+
+class BatchCrawlItemResult(BaseModel):
+    """Result for a single URL entry in the batch."""
+    url: str = Field(description="The crawled URL")
+    success: bool = Field(description="True if the crawl succeeded")
+    result: CrawlResponse | None = Field(default=None, description="Crawl result (only when success=true)")
+    error: str | None = Field(default=None, description="Error message (only when success=false)")
+
+
+class BatchCrawlResponse(BaseModel):
+    """Response from the batch crawl endpoint."""
+    total: int = Field(description="Total number of URLs crawled")
+    succeeded: int = Field(description="Number of successfully crawled URLs")
+    failed: int = Field(description="Number of failed URLs")
+    results: List[BatchCrawlItemResult] = Field(description="Individual results in input order")
+    elapsed_ms: int = Field(description="Total duration of the batch request in milliseconds")
 
 
 class LinkInfo(BaseModel):
-    """Informationen über einen extrahierten Link."""
-    url: str = Field(description="Vollständige URL des Links")
-    text: Optional[str] = Field(default=None, description="Angezeigter Link-Text")
-    internal: bool = Field(description="True wenn Link zur gleichen Domain gehört")
+    """Information about an extracted link."""
+    url: str = Field(description="Full URL of the link")
+    text: str | None = Field(default=None, description="Visible link text")
+    internal: bool = Field(description="True if the link belongs to the same domain")
     category: Literal[
         "content",
-        "social", 
+        "social",
         "nav",
         "auth",
         "legal",
@@ -242,37 +355,30 @@ class LinkInfo(BaseModel):
         "download",
         "anchor",
         "other",
-    ] = Field(default="other", description="Automatisch erkannte Link-Kategorie")
+    ] = Field(default="other", description="Automatically detected link category")
 
 
-class LLMResult(BaseModel):
-    """Ergebnis der LLM-Nachbearbeitung."""
-    cleaned_markdown: str = Field(description="Bereinigter und strukturierter Markdown-Text")
-    classification: Literal[
-        "Bildungsinhalt",
-        "Metabeschreibung", 
-        "Fehler/Infoseite",
-    ] = Field(default="Metabeschreibung", description="Automatische Inhalts-Klassifizierung")
-    anonymized: bool = Field(default=False, description="Ob personenbezogene Daten anonymisiert wurden")
-    tokens_used: int | None = Field(default=None, description="Anzahl verbrauchter OpenAI-Tokens")
+class AnonymizationResult(BaseModel):
+    """Metadata of a Presidio anonymisation run."""
+    entities_found: list[str] = Field(default_factory=list, description="Detected PII types (e.g. PERSON, EMAIL_ADDRESS)")
+    entity_count: int = Field(default=0, description="Number of detected PII occurrences")
+    warning: str | None = Field(default=None, description="Warning if anonymisation was incomplete")
 
 
 class CrawlResponse(BaseModel):
-    """
-    Antwort-Schema für Crawl-Requests.
-    
-    Enthält sowohl die ursprünglichen Rohdaten als auch optional bereinigte LLM-Ergebnisse.
-    """
-    request_mode: Literal["fast", "js", "auto"] = Field(description="Verwendeter Crawl-Modus")
-    requested_url: str = Field(description="Ursprünglich angeforderte URL")
-    final_url: str = Field(description="Finale URL nach Redirects")
-    status_code: int = Field(description="HTTP-Status-Code (200, 404, etc.)")
-    redirected: bool = Field(description="Ob Redirects aufgetreten sind")
-    content_type: str | None = Field(description="MIME-Type der Antwort (text/html, application/pdf, etc.)")
-    markdown: str = Field(description="Originaler Markdown-Inhalt (unbearbeitet)")
-    markdown_length: int = Field(description="Länge des Markdown-Texts in Zeichen")
-    truncated: bool = Field(description="Ob die Antwort aufgrund von max_bytes gekürzt wurde")
-    error_page_detected: bool = Field(description="Ob eine Fehlerseite erkannt wurde (404, 403, etc.)")
-    links: Optional[list[LinkInfo]] = Field(default=None, description="Extrahierte Links (nur wenn extract_links=true)")
-    llm: Optional[LLMResult] = Field(default=None, description="LLM-Nachbearbeitung (nur wenn llm_postprocess=true)")
-    elapsed_ms: int = Field(description="Gesamtdauer des Requests in Millisekunden")
+    """Response schema for crawl requests."""
+    request_mode: Literal["fast", "js", "auto"] = Field(description="Crawl mode that was used")
+    requested_url: str = Field(description="Original URL from the request")
+    final_url: str = Field(description="Final URL after redirects")
+    status_code: int = Field(description="HTTP status code of the target page (200, 404, etc.)")
+    redirected: bool = Field(description="Whether any redirects occurred")
+    content_type: str | None = Field(description="MIME type of the response (text/html, application/pdf, etc.)")
+    markdown: str = Field(description="Extracted Markdown content")
+    markdown_length: int = Field(description="Character count of the Markdown text")
+    word_count: int = Field(description="Word count of the Markdown text")
+    error_page_detected: bool = Field(description="Whether an error page was detected (404, 403, captcha, thin/empty content, etc.)")
+    links: list[LinkInfo] | None = Field(default=None, description="Extracted links (only when extract_links=true)")
+    screenshot_base64: str | None = Field(default=None, description="Viewport screenshot as Base64-encoded PNG (only when screenshot=true and Selenium was used)")
+    anonymization: AnonymizationResult | None = Field(default=None, description="Presidio anonymisation metadata (only when anonymize=true)")
+    elapsed_ms: int = Field(description="Total request duration in milliseconds")
+    cached: bool = Field(default=False, description="True if the result was served from the shared result cache")

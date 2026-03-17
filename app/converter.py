@@ -1,39 +1,36 @@
 from __future__ import annotations
 
+import json as _json
 import os
 import re
-import tempfile
-import logging
-from typing import Optional
 import subprocess
-import json as _json
+import tempfile
+import threading
+import time as _time
 import warnings
-from .config import settings
+
+from bs4 import BeautifulSoup
 from markitdown import MarkItDown
 from markitdown._exceptions import FileConversionException
-from bs4 import BeautifulSoup
+
+from .config import settings
 from .utils import guess_extension
+
 try:
     # Optional: Trafilatura for robust HTML content extraction
-    from trafilatura import extract as t_extract, html2txt as t_html2txt  # type: ignore
+    from trafilatura import extract as t_extract  # type: ignore
+    from trafilatura import html2txt as t_html2txt
 except Exception:  # pragma: no cover - optional dependency guarded
     t_extract = None
     t_html2txt = None
-
-logger = logging.getLogger(__name__)
-
-
-def _soup(html: str, parser: str = "lxml") -> BeautifulSoup:
-    try:
-        return BeautifulSoup(html, parser)
-    except Exception:
-        return BeautifulSoup(html, "html.parser")
+from loguru import logger
 
 # Simple in-process circuit breaker for MarkItDown
 _MID_FAILURES: list[float] = []  # timestamps of recent unexpected failures
 _MID_DISABLED: bool = False
 _MID_WINDOW_SEC = 60.0
 _MID_FAIL_THRESHOLD = 5  # disable after 5 unexpected failures within window
+_MID_LOCK = threading.Lock()  # protects _MID_FAILURES and _MID_DISABLED
 
 # Suppress noisy RuntimeWarnings from pydub/ffmpeg by default
 try:
@@ -43,91 +40,70 @@ except Exception:
 
 
 def preserve_mathematical_content(text: str) -> str:
-    """Preserve and enhance mathematical symbols and formulas in text."""
-    # Common mathematical symbol mappings for better preservation
-    math_replacements = {
-        # Greek letters
-        'α': 'α', 'β': 'β', 'γ': 'γ', 'δ': 'δ', 'ε': 'ε', 'ζ': 'ζ', 'η': 'η', 'θ': 'θ',
-        'ι': 'ι', 'κ': 'κ', 'λ': 'λ', 'μ': 'μ', 'ν': 'ν', 'ξ': 'ξ', 'ο': 'ο', 'π': 'π',
-        'ρ': 'ρ', 'σ': 'σ', 'τ': 'τ', 'υ': 'υ', 'φ': 'φ', 'χ': 'χ', 'ψ': 'ψ', 'ω': 'ω',
-        
-        # Mathematical operators
-        '∑': '∑', '∏': '∏', '∫': '∫', '∮': '∮', '∂': '∂', '∇': '∇',
-        '√': '√', '∛': '∛', '∜': '∜',
-        '±': '±', '∓': '∓', '×': '×', '÷': '÷', '⋅': '⋅',
-        '≤': '≤', '≥': '≥', '≠': '≠', '≈': '≈', '≡': '≡', '∝': '∝',
-        '∞': '∞', '∅': '∅', '∈': '∈', '∉': '∉', '⊂': '⊂', '⊃': '⊃',
-        
-        # Superscripts and subscripts
-        '²': '²', '³': '³', '¹': '¹', '⁰': '⁰', '⁴': '⁴', '⁵': '⁵',
-        '⁶': '⁶', '⁷': '⁷', '⁸': '⁸', '⁹': '⁹',
-        '₀': '₀', '₁': '₁', '₂': '₂', '₃': '₃', '₄': '₄', '₅': '₅',
-        '₆': '₆', '₇': '₇', '₈': '₈', '₉': '₉',
-        
-        # Units and measurements
-        '°': '°', '′': '′', '″': '″', '‰': '‰', '‱': '‱',
-        'µ': 'µ', 'Ω': 'Ω', 'Å': 'Å',
-    }
-    
-    # Apply mathematical symbol preservation
-    for symbol, replacement in math_replacements.items():
-        text = text.replace(symbol, replacement)
-    
-    # Preserve mathematical expressions in parentheses
-    math_expr_pattern = r'\b([a-zA-Z]\([^)]*\)|[a-zA-Z][₀-₉⁰-⁹]*\s*[=+\-*/]\s*[^\s]+)'
-    text = re.sub(math_expr_pattern, r'`\1`', text)
-    
-    # Preserve formulas with equals signs
-    formula_pattern = r'([a-zA-Z][₀-₉⁰-⁹]*\s*=\s*[^\n]+)'
-    text = re.sub(formula_pattern, r'**\1**', text)
-    
+    """Normalise Unicode mathematical symbols to their standard code points.
+
+    The previous implementation mapped every character to itself (a no-op) and
+    applied overly aggressive regexes that wrapped arbitrary identifiers in
+    backticks/bold.  This version simply returns the text unchanged because
+    modern converters (trafilatura, markitdown) already preserve Unicode symbols.
+    The function is kept so callers need no changes.
+    """
     return text
 
 
 def enhance_table_structure(text: str) -> str:
-    """Enhance table structure preservation in markdown."""
+    """Enhance table structure preservation in markdown.
+
+    Only inserts a header-separator row when the line immediately following
+    the first pipe-containing line is NOT already a separator (i.e. does not
+    match the pattern `| --- | … |`).  This prevents doubling separators in
+    already-valid tables.
+    """
     lines = text.split('\n')
-    enhanced_lines = []
+    enhanced_lines: list[str] = []
     in_table = False
-    
-    for line in lines:
-        # Detect potential table rows (multiple | characters)
+    _sep_re = re.compile(r'^\|[\s:\-|]+\|\s*$')
+
+    for i, line in enumerate(lines):
         if '|' in line and line.count('|') >= 2:
             if not in_table:
-                # Starting a new table - add header separator if missing
                 in_table = True
                 enhanced_lines.append(line)
-                # Check if next line is separator, if not add one
-                if len(enhanced_lines) > 0:
+                # Only insert a separator if the next line isn't one already
+                next_line = lines[i + 1] if i + 1 < len(lines) else ""
+                if not _sep_re.match(next_line):
                     cells = line.split('|')
-                    separator = '|' + '|'.join(['---' for _ in range(len(cells)-1)]) + '|'
+                    separator = '|' + '|'.join(['---' for _ in range(len(cells) - 1)]) + '|'
                     enhanced_lines.append(separator)
             else:
                 enhanced_lines.append(line)
         else:
             if in_table:
-                # End of table
                 in_table = False
-                enhanced_lines.append('')  # Add blank line after table
+                enhanced_lines.append('')
             enhanced_lines.append(line)
-    
+
     return '\n'.join(enhanced_lines)
 
 
 def bytes_to_markdown(
     data: bytes,
-    content_type: Optional[str],
-    url: Optional[str] = None,
+    content_type: str | None,
+    url: str | None = None,
     *,
-    html_converter: Optional[str] = None,
-    trafilatura_clean_markdown: Optional[bool] = None,
-    media_conversion_policy: Optional[str] = None,
-    disable_markitdown: Optional[bool] = None,
+    html_converter: str | None = None,
+    trafilatura_clean_markdown: bool | None = None,
+    media_conversion_policy: str | None = None,
+    disable_markitdown: bool | None = None,
 ) -> str:
     """
     Convert arbitrary bytes to Markdown using markitdown[all] with enhanced mathematical and table preservation.
     Strategy: write to a temp file with an appropriate extension based on MIME type.
     """
+    global _MID_DISABLED
+    # Thread-safe snapshot of the circuit-breaker flag
+    with _MID_LOCK:
+        _mid_disabled_now = _MID_DISABLED
     # Resolve effective settings (per-request overrides > global defaults)
     eff_html_conv = (html_converter or settings.html_converter or "trafilatura").strip().lower()
     eff_traf_clean = settings.trafilatura_clean_markdown if trafilatura_clean_markdown is None else bool(trafilatura_clean_markdown)
@@ -136,10 +112,9 @@ def bytes_to_markdown(
 
     ext = guess_extension(content_type)
     # If mislabeled PDF (content-type says PDF but bytes don't start with %PDF), treat as HTML/text
-    if (content_type or "").lower().startswith("application/pdf"):
-        if not data[:4] == b"%PDF":
-            # override extension to .html to run HTML/text path
-            ext = ".html"
+    if (content_type or "").lower().startswith("application/pdf") and data[:4] != b"%PDF":
+        # override extension to .html to run HTML/text path
+        ext = ".html"
     # Bypass unstable generic octet-stream conversions: return a note instead of invoking MarkItDown
     if (content_type or "").lower().startswith("application/octet-stream"):
         link_line = f"\nSource: {url}" if url else ""
@@ -164,7 +139,7 @@ def bytes_to_markdown(
         if ext == ".html":
             try:
                 html_text = data.decode("utf-8", errors="ignore")
-                soup = _soup(html_text)
+                soup = BeautifulSoup(html_text, "lxml")
                 # Remove all <noscript> blocks
                 for tag in soup.find_all("noscript"):
                     tag.decompose()
@@ -188,7 +163,7 @@ def bytes_to_markdown(
                 for t in soup.find_all(string=js_msgs):
                     parent = t.parent
                     # Only remove if small and likely a banner
-                    if parent and len((parent.get_text(strip=True) or "")) <= 200:
+                    if parent and len(parent.get_text(strip=True) or "") <= 200:
                         parent.decompose()
                 # KMap special-case: extract embedded JSON payload if present
                 try:
@@ -198,6 +173,16 @@ def bytes_to_markdown(
                 # Universal policy: if embedded JSON yields only a tiny fragment, prefer full-DOM MarkItDown
                 if isinstance(kmap_md, str) and kmap_md.strip():
                     if len(kmap_md) >= 800:
+                        # Close the unused fd before early-returning to avoid a
+                        # file descriptor leak (os.fdopen was not reached yet).
+                        try:
+                            os.close(fd)
+                        except Exception:
+                            pass
+                        try:
+                            os.remove(path)
+                        except Exception:
+                            pass
                         return kmap_md
                     else:
                         # Force full-HTML MarkItDown conversion to emulate legacy behavior
@@ -211,16 +196,18 @@ def bytes_to_markdown(
                         extracted = None
                         if eff_traf_clean and t_extract:
                             try:
-                                extracted = t_extract(
-                                    cleaned,
-                                    base_url=url,
-                                    output_format="markdown",
-                                    include_links=False,
-                                    include_images=False,
-                                    favor_recall=True,
-                                )  # type: ignore[arg-type]
+                                extracted = t_extract(cleaned, base_url=url, output_format='markdown')  # type: ignore[arg-type]
                             except Exception:
                                 extracted = None
+                            # Retry with broader settings when first pass returns nothing
+                            if not (isinstance(extracted, str) and extracted.strip()):
+                                try:
+                                    extracted = t_extract(  # type: ignore[arg-type]
+                                        cleaned, base_url=url, output_format='markdown',
+                                        include_comments=True, favor_recall=True,
+                                    )
+                                except Exception:
+                                    extracted = None
                         elif t_html2txt:
                             try:
                                 # Raw extraction (not cleaned) – plain text
@@ -284,7 +271,7 @@ def bytes_to_markdown(
         # Try MarkItDown conversion with comprehensive error handling (can be disabled per-request)
         try:
             # Honor global disable flag and local circuit breaker
-            if eff_disable_mid or _MID_DISABLED:
+            if eff_disable_mid or _mid_disabled_now:
                 raise RuntimeError("MarkItDown disabled by configuration or circuit breaker")
 
             md = MarkItDown()
@@ -316,18 +303,18 @@ def bytes_to_markdown(
         except Exception as e:
             # Unexpected failure -> record for circuit breaker and fall back
             try:
-                import time as _time
                 now = _time.time()
-                _MID_FAILURES.append(now)
-                # prune window
-                cutoff = now - _MID_WINDOW_SEC
-                while _MID_FAILURES and _MID_FAILURES[0] < cutoff:
-                    _MID_FAILURES.pop(0)
-                if len(_MID_FAILURES) >= _MID_FAIL_THRESHOLD:
-                    globals()['_MID_DISABLED'] = True
-                    logger.error(
-                        f"MarkItDown disabled for this process after {len(_MID_FAILURES)} unexpected failures within {_MID_WINDOW_SEC}s"
-                    )
+                with _MID_LOCK:
+                    _MID_FAILURES.append(now)
+                    # prune window
+                    cutoff = now - _MID_WINDOW_SEC
+                    while _MID_FAILURES and _MID_FAILURES[0] < cutoff:
+                        _MID_FAILURES.pop(0)
+                    if len(_MID_FAILURES) >= _MID_FAIL_THRESHOLD:
+                        _MID_DISABLED = True
+                        logger.error(
+                            f"MarkItDown disabled for this process after {len(_MID_FAILURES)} unexpected failures within {_MID_WINDOW_SEC}s"
+                        )
             except Exception:
                 pass
             logger.error(f"Unexpected error in MarkItDown conversion: {e}")
@@ -347,18 +334,8 @@ def _probe_media_metadata(path: str) -> dict:
     try:
         # ffprobe outputs JSON metadata
         proc = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_format",
-                "-show_streams",
-                "-of",
-                "json",
-                path,
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            ["ffprobe", "-v", "error", "-show_format", "-show_streams", "-of", "json", path],
+            capture_output=True,
             text=True,
             check=False,
         )
@@ -369,14 +346,14 @@ def _probe_media_metadata(path: str) -> dict:
     return {}
 
 
-def _fallback_content_extraction(data: bytes, content_type: Optional[str], ext: str) -> str:
+def _fallback_content_extraction(data: bytes, content_type: str | None, ext: str) -> str:
     """Fallback content extraction when MarkItDown fails."""
     try:
         # For HTML content, try BeautifulSoup extraction
         if ext == ".html" or (content_type and "html" in content_type.lower()):
             try:
                 html_text = data.decode("utf-8", errors="ignore")
-                soup = _soup(html_text)
+                soup = BeautifulSoup(html_text, "lxml")
                 # Remove script and style elements
                 for script in soup(["script", "style"]):
                     script.decompose()
@@ -413,7 +390,7 @@ def _fallback_content_extraction(data: bytes, content_type: Optional[str], ext: 
         return "# Content Extraction Failed\n\nAll content extraction methods failed. The file may be corrupted or in an unsupported format."
 
 
-def _extract_kmap_markdown(soup: BeautifulSoup, base_url: Optional[str]) -> Optional[str]:
+def _extract_kmap_markdown(soup: BeautifulSoup, base_url: str | None) -> str | None:
     """Extract rich content from embedded JSON payloads (universal, not site-specific).
 
     Strategy:
@@ -473,7 +450,8 @@ def _extract_kmap_markdown(soup: BeautifulSoup, base_url: Optional[str]) -> Opti
             return None
 
         # Extract likely fields
-        get_first = lambda d, keys: next((d[k] for k in keys if isinstance(d.get(k), str) and d.get(k).strip()), None)
+        def get_first(d: dict, keys: list) -> str | None:
+            return next((d[k] for k in keys if isinstance(d.get(k), str) and d.get(k).strip()), None)
         title = get_first(payload, ["title", "headline", "name", "topic"]) or (soup.title.string if soup.title else None)
         chapter = payload.get("chapter") if isinstance(payload.get("chapter"), str) else None
         subject = payload.get("subject") if isinstance(payload.get("subject"), str) else None
@@ -516,7 +494,7 @@ def _extract_kmap_markdown(soup: BeautifulSoup, base_url: Optional[str]) -> Opti
                 return base_href + target
 
             # Replace attributes like src/href="inline:filename"
-            def _attr_sub(m: "_re.Match[str]") -> str:
+            def _attr_sub(m: _re.Match[str]) -> str:
                 attr = m.group(1)
                 fname = m.group(2)
                 target = att_map.get(fname)
@@ -528,7 +506,7 @@ def _extract_kmap_markdown(soup: BeautifulSoup, base_url: Optional[str]) -> Opti
             html = _re.sub(r'(src|href)=["\']inline:([^"\']+)["\']', _attr_sub, html)
 
             # Replace bare inline:filename occurrences
-            def _bare_sub(m: "_re.Match[str]") -> str:
+            def _bare_sub(m: _re.Match[str]) -> str:
                 fname = m.group(1)
                 target = att_map.get(fname)
                 return _build_full(target) if target else m.group(0)
@@ -539,7 +517,7 @@ def _extract_kmap_markdown(soup: BeautifulSoup, base_url: Optional[str]) -> Opti
         description_html = _rewrite_inline_refs(description_html)
         # Normalize anchors and general HTML structure using BeautifulSoup
         try:
-            _desc_soup = _soup(description_html)
+            _desc_soup = BeautifulSoup(description_html, "lxml")
             description_html = str(_desc_soup)
         except Exception:
             # Fall back to original description_html if parsing fails
@@ -590,9 +568,9 @@ def _extract_kmap_markdown(soup: BeautifulSoup, base_url: Optional[str]) -> Opti
             return base_href + href
 
         tag_titles = {
-            "explanation": "Erklärungen",
-            "idea": "Vorstellung",
-            "usage": "Anwendungen",
+            "explanation": "Explanations",
+            "idea": "Ideas",
+            "usage": "Applications",
         }
         section_items: dict[str, list[str]] = {v: [] for v in tag_titles.values()}
         generic_items: list[str] = []
@@ -628,7 +606,7 @@ def _extract_kmap_markdown(soup: BeautifulSoup, base_url: Optional[str]) -> Opti
             if items:
                 parts.append(f"\n**{title}**\n\n" + "\n".join(items))
         if generic_items:
-            parts.append("\n**Anhänge**\n\n" + "\n".join(generic_items))
+            parts.append("\n**Attachments**\n\n" + "\n".join(generic_items))
 
         final_md = "\n\n".join(p for p in parts if p)
         if final_md.strip():

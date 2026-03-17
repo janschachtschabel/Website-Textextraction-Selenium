@@ -1,10 +1,11 @@
+# This module has been removed.
+# LLM post-processing and anonymization are replaced by Microsoft Presidio.
+# See app/anonymizer.py for the new implementation.
+raise ImportError(
+    "app.llm has been removed. Use app.anonymizer for PII anonymization."
+)
+
 from __future__ import annotations
-
-import json
-import re
-from typing import Optional
-from openai import OpenAI, AsyncOpenAI
-
 
 SYSTEM_PROMPT = (
     "Du bist ein Assistent, der Markdown-Texte bereinigt und klassifiziert. "
@@ -38,7 +39,8 @@ def _extract_json_object(s: str) -> dict:
 
     - Strips code fences
     - Tries full-string json.loads
-    - Falls back to extracting the first {...} that contains the key 'cleaned_markdown'
+    - Falls back to a brace-counting scan that correctly handles nested braces
+      and } characters inside string values (unlike non-greedy regex).
     """
     if not isinstance(s, str):
         return {}
@@ -48,22 +50,46 @@ def _extract_json_object(s: str) -> dict:
         return json.loads(s1)
     except Exception:
         pass
-    # Try to locate a JSON object substring that includes the key of interest
+    # Brace-counting extractor: finds every top-level {...} block correctly
     try:
-        # Greedy to last closing brace
-        # Prefer a block that contains the cleaned_markdown key
-        for match in re.finditer(r"\{[\s\S]*?\}", s1):
-            block = match.group(0)
-            if '"cleaned_markdown"' in block:
-                try:
-                    return json.loads(block)
-                except Exception:
-                    continue
-        # Fallback: last brace block
-        last_open = s1.find('{')
-        last_close = s1.rfind('}')
-        if last_open != -1 and last_close != -1 and last_close > last_open:
-            return json.loads(s1[last_open:last_close + 1])
+        i = 0
+        while i < len(s1):
+            if s1[i] != '{':
+                i += 1
+                continue
+            depth = 0
+            in_str = False
+            escape = False
+            j = i
+            while j < len(s1):
+                ch = s1[j]
+                if escape:
+                    escape = False
+                elif ch == '\\' and in_str:
+                    escape = True
+                elif ch == '"':
+                    in_str = not in_str
+                elif not in_str:
+                    if ch == '{':
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
+                        if depth == 0:
+                            block = s1[i:j + 1]
+                            try:
+                                obj = json.loads(block)
+                                if isinstance(obj, dict) and 'cleaned_markdown' in obj:
+                                    return obj
+                            except Exception:
+                                pass
+                            break
+                j += 1
+            i += 1
+        # Last-resort: span from first { to last }
+        first = s1.find('{')
+        last = s1.rfind('}')
+        if first != -1 and last > first:
+            return json.loads(s1[first:last + 1])
     except Exception:
         pass
     return {}
@@ -90,60 +116,27 @@ def _flatten_cleaned_markdown(value: str) -> str:
     return text
 
 
-def postprocess_markdown(
-    *,
-    markdown: str,
-    base_url: Optional[str],
-    api_key: str,
-    model: str,
-    base: Optional[str] = None,
-    clean_prompt: Optional[str] = None,
-    anonymize: bool = False,
+def _supports_new_params(model: str) -> bool:
+    """True if the model accepts reasoning/verbosity via responses.create."""
+    return "gpt-5" in model.lower()
+
+
+def _build_user_prompt(markdown: str, clean_prompt: str | None, anonymize: bool) -> str:
+    extra = (clean_prompt or "").strip()
+    if anonymize:
+        extra += "\nFühre zusätzlich eine Anonymisierung personenbezogener Daten durch."
+    return f"Bereinige folgenden Markdown-Inhalt. {extra}\n---\n{markdown}\n---\n"
+
+
+def _parse_llm_response(
+    content: str | None,
+    original_markdown: str,
+    anonymize: bool,
 ) -> tuple[str, str, bool, int | None]:
-    """
-    Returns: cleaned_markdown, classification, anonymized, tokens_used
-    """
-    client = OpenAI(api_key=api_key, base_url=base or None)
-
-    user_prompt = """Bereinige folgenden Markdown-Inhalt. {extra}
----
-{md}
----
-""".format(
-        extra=(clean_prompt or "").strip()
-        + ("\nFühre zusätzlich eine Anonymisierung personenbezogener Daten durch." if anonymize else ""),
-        md=markdown,
-    )
-
-    # Prefer Responses API if available; fallback to chat.completions
-    try:
-        # Responses API
-        resp = client.responses.create(
-            model=model,
-            input=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        content = resp.output_text  # type: ignore[attr-defined]
-        usage = getattr(resp, "usage", None)
-        tokens_used = getattr(usage, "total_tokens", None) if usage else None
-    except Exception:
-        # Fallback to Chat Completions
-        chat = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        content = chat.choices[0].message.content if chat.choices else ""
-        tokens_used = getattr(chat, "usage", None).total_tokens if getattr(chat, "usage", None) else None
-
-    cleaned = markdown
+    """Shared post-processing logic for both sync and async LLM calls."""
+    cleaned = original_markdown
     classification = "Metabeschreibung"
     anonymized = anonymize
-
     try:
         data = _extract_json_object(content or "")
         if data:
@@ -155,81 +148,99 @@ def postprocess_markdown(
         else:
             raise ValueError("no_json")
     except Exception:
-        # If not JSON, try to keep the content if looks like markdown
         if isinstance(content, str) and content.strip():
             cleaned = _strip_code_fences(content.strip())
+    return cleaned, classification, anonymized, None
 
+
+def postprocess_markdown(
+    *,
+    markdown: str,
+    base_url: str | None,
+    api_key: str,
+    model: str,
+    base: str | None = None,
+    clean_prompt: str | None = None,
+    anonymize: bool = False,
+    reasoning_effort: str | None = None,
+    verbosity: str | None = None,
+) -> tuple[str, str, bool, int | None]:
+    """
+    Returns: cleaned_markdown, classification, anonymized, tokens_used
+    """
+    client = OpenAI(api_key=api_key, base_url=base or None)
+    user_prompt = _build_user_prompt(markdown, clean_prompt, anonymize)
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    # Build extra kwargs for gpt-5 family (reasoning + verbosity controls)
+    extra: dict = {}
+    if _supports_new_params(model):
+        if reasoning_effort:
+            extra["reasoning"] = {"effort": reasoning_effort}
+        if verbosity:
+            extra["text"] = {"verbosity": verbosity}
+
+    content: str | None = None
+    tokens_used: int | None = None
+    try:
+        resp = client.responses.create(model=model, input=messages, **extra)  # type: ignore[arg-type]
+        content = resp.output_text  # type: ignore[attr-defined]
+        usage = getattr(resp, "usage", None)
+        tokens_used = getattr(usage, "total_tokens", None) if usage else None
+    except Exception:
+        chat = client.chat.completions.create(model=model, messages=messages)  # type: ignore[arg-type]
+        content = chat.choices[0].message.content if chat.choices else ""
+        tokens_used = getattr(chat, "usage", None).total_tokens if getattr(chat, "usage", None) else None
+
+    cleaned, classification, anonymized, _ = _parse_llm_response(content, markdown, anonymize)
     return cleaned, classification, anonymized, tokens_used
 
 
 async def postprocess_markdown_async(
     *,
     markdown: str,
-    base_url: Optional[str],
+    base_url: str | None,
     api_key: str,
     model: str,
-    base: Optional[str] = None,
-    clean_prompt: Optional[str] = None,
+    base: str | None = None,
+    clean_prompt: str | None = None,
     anonymize: bool = False,
+    reasoning_effort: str | None = None,
+    verbosity: str | None = None,
 ) -> tuple[str, str, bool, int | None]:
     """
     Async variant to prevent blocking the event loop.
     Returns: cleaned_markdown, classification, anonymized, tokens_used
     """
     client = AsyncOpenAI(api_key=api_key, base_url=base or None)
+    user_prompt = _build_user_prompt(markdown, clean_prompt, anonymize)
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
 
-    user_prompt = """Bereinige folgenden Markdown-Inhalt. {extra}
----
-{md}
----
-""".format(
-        extra=(clean_prompt or "").strip()
-        + ("\nFühre zusätzlich eine Anonymisierung personenbezogener Daten durch." if anonymize else ""),
-        md=markdown,
-    )
+    # Build extra kwargs for gpt-5 family (reasoning + verbosity controls)
+    extra: dict = {}
+    if _supports_new_params(model):
+        if reasoning_effort:
+            extra["reasoning"] = {"effort": reasoning_effort}
+        if verbosity:
+            extra["text"] = {"verbosity": verbosity}
 
-    # Prefer Responses API if available; fallback to chat.completions
+    content: str | None = None
+    tokens_used: int | None = None
     try:
-        # Responses API
-        resp = await client.responses.create(
-            model=model,
-            input=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
+        resp = await client.responses.create(model=model, input=messages, **extra)  # type: ignore[arg-type]
         content = resp.output_text  # type: ignore[attr-defined]
         usage = getattr(resp, "usage", None)
         tokens_used = getattr(usage, "total_tokens", None) if usage else None
     except Exception:
-        # Fallback to Chat Completions
-        chat = await client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
+        chat = await client.chat.completions.create(model=model, messages=messages)  # type: ignore[arg-type]
         content = chat.choices[0].message.content if chat.choices else ""
         tokens_used = getattr(chat, "usage", None).total_tokens if getattr(chat, "usage", None) else None
 
-    cleaned = markdown
-    classification = "Metabeschreibung"
-    anonymized = anonymize
-
-    try:
-        data = _extract_json_object(content or "")
-        if data:
-            new_cleaned = data.get("cleaned_markdown")
-            if isinstance(new_cleaned, str):
-                cleaned = _flatten_cleaned_markdown(new_cleaned) or cleaned
-            classification = data.get("classification", classification) or classification
-            anonymized = bool(data.get("anonymized", anonymized))
-        else:
-            raise ValueError("no_json")
-    except Exception:
-        # If not JSON, try to keep the content if looks like markdown
-        if isinstance(content, str) and content.strip():
-            cleaned = _strip_code_fences(content.strip())
-
+    cleaned, classification, anonymized, _ = _parse_llm_response(content, markdown, anonymize)
     return cleaned, classification, anonymized, tokens_used

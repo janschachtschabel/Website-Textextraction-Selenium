@@ -1,27 +1,28 @@
 from __future__ import annotations
 
-import asyncio
+import os
 import queue
 import threading
 import time
-import logging
-from typing import Optional, Tuple
-from starlette.concurrency import run_in_threadpool
+
+from loguru import logger
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from starlette.concurrency import run_in_threadpool
 from webdriver_manager.chrome import ChromeDriverManager
-
-logger = logging.getLogger(__name__)
-
 
 # Global driver pool - configurable via environment
 from .config import settings
-from .utils import pick_user_agent
+from .utils import detect_error_page, pick_user_agent
+
+# Cache the ChromeDriver binary path after the first install to avoid repeated
+# network/disk lookups on every driver creation.
+_chromedriver_path: str | None = None
+_chromedriver_lock = threading.Lock()
 
 # Dynamic pool management
 _driver_pools: dict[str, queue.Queue] = {
@@ -38,12 +39,20 @@ _pool_lock = threading.Lock()
 _scaling_lock = threading.Lock()
 
 
-def _create_driver(proxy: Optional[str] = None, user_agent: Optional[str] = None, page_load_strategy: str = 'normal') -> webdriver.Chrome:
+def _create_driver(
+    proxy: str | None = None,
+    user_agent: str | None = None,
+    page_load_strategy: str = 'normal',
+    allow_insecure_ssl: bool = False,
+) -> webdriver.Chrome:
     """Create a new Chrome driver with enhanced stability and anti-detection options.
 
     page_load_strategy: 'normal' | 'eager'
     """
     options = Options()
+    _chrome_bin = os.environ.get("CHROME_BINARY")
+    if _chrome_bin:
+        options.binary_location = _chrome_bin
     options.add_argument("--headless=new")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--no-sandbox")
@@ -68,7 +77,6 @@ def _create_driver(proxy: Optional[str] = None, user_agent: Optional[str] = None
     
     # Additional anti-detection and stability flags
     options.add_argument("--disable-web-security")
-    options.add_argument("--disable-features=VizDisplayCompositor")
     options.add_argument("--disable-hang-monitor")
     options.add_argument("--disable-prompt-on-repost")
     options.add_argument("--disable-domain-reliability")
@@ -91,13 +99,20 @@ def _create_driver(proxy: Optional[str] = None, user_agent: Optional[str] = None
         # Default realistic user agent
         options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
+    # SSL certificate verification
+    if allow_insecure_ssl or (settings.allow_insecure_ssl):
+        options.add_argument("--ignore-certificate-errors")
+        options.add_argument("--ignore-ssl-errors")
+        options.add_argument("--ignore-certificate-errors-spki-list")
+
     # Enhanced proxy handling
     if proxy and proxy.strip() and proxy.strip().lower() != "string":
         options.add_argument(f"--proxy-server={proxy}")
-        # Disable proxy-related security features that might interfere
         options.add_argument("--ignore-ssl-errors-on-proxy")
-        options.add_argument("--ignore-certificate-errors-spki-list")
-        options.add_argument("--ignore-certificate-errors")
+        if not (allow_insecure_ssl or settings.allow_insecure_ssl):
+            # Only add these when not already set globally above
+            options.add_argument("--ignore-certificate-errors-spki-list")
+            options.add_argument("--ignore-certificate-errors")
     
     # Enhanced stealth settings
     options.add_argument("--disable-extensions")
@@ -116,15 +131,21 @@ def _create_driver(proxy: Optional[str] = None, user_agent: Optional[str] = None
     except Exception:
         pass
 
-    service = Service(ChromeDriverManager().install())
+    global _chromedriver_path
+    if _chromedriver_path is None:
+        with _chromedriver_lock:
+            if _chromedriver_path is None:
+                _chromedriver_path = ChromeDriverManager().install()
+    service = Service(_chromedriver_path)
     driver = webdriver.Chrome(service=service, options=options)
     # Mark driver with its strategy for returning to the right pool
     try:
-        setattr(driver, "_strategy_key", 'eager' if page_load_strategy == 'eager' else 'normal')
+        driver._strategy_key = 'eager' if page_load_strategy == 'eager' else 'normal'
     except Exception:
         pass
     
-    # Enhanced anti-detection script
+    # Enhanced anti-detection script – injected via CDP so it runs on EVERY page load,
+    # not just the blank page at driver creation time.
     stealth_script = """
     (() => {
       try {
@@ -179,23 +200,39 @@ def _create_driver(proxy: Optional[str] = None, user_agent: Optional[str] = None
     })();
     """
     try:
-        driver.execute_script(stealth_script)
+        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": stealth_script})
     except Exception:
-        # If stealth injection fails, continue without it to avoid hard failures
-        pass
+        # Fallback: run once on current page if CDP injection fails
+        try:
+            driver.execute_script(stealth_script)
+        except Exception:
+            pass
     
     return driver
 
 
 def _initialize_pool(strategy_key: str):
-    """Initialize the driver pool for the given strategy on first use."""
+    """Initialize the driver pool for the given strategy on first use.
+
+    The lock is only held long enough to check/set the initialized flag.
+    Actual driver creation happens outside the lock to avoid blocking other
+    threads for N * 30 s (one driver-creation per slot at startup).
+    """
     with _pool_lock:
-        if not _pool_initialized.get(strategy_key, False):
-            initial_size = _pool_sizes[strategy_key]
-            for _ in range(initial_size):
-                driver = _create_driver(page_load_strategy=('eager' if strategy_key == 'eager' else 'normal'))
-                _driver_pools[strategy_key].put(driver)
-            _pool_initialized[strategy_key] = True
+        if _pool_initialized.get(strategy_key, False):
+            return
+        # Mark as initialized before releasing the lock so concurrent callers
+        # don't also try to create the initial drivers.
+        _pool_initialized[strategy_key] = True
+        initial_size = _pool_sizes[strategy_key]
+
+    page_load_strategy = 'eager' if strategy_key == 'eager' else 'normal'
+    for _ in range(initial_size):
+        try:
+            driver = _create_driver(page_load_strategy=page_load_strategy)
+            _driver_pools[strategy_key].put(driver)
+        except Exception as e:
+            logger.warning(f"Failed to create initial driver for {strategy_key} pool: {e}")
 
 
 def _pick_strategy_key(js_strategy: str) -> str:
@@ -211,12 +248,12 @@ def _get_driver(js_strategy: str, timeout_seconds: int = 30) -> webdriver.Chrome
     # Check if we should scale up the pool
     _maybe_scale_pool(key)
     
+    # Track usage for scaling decisions
+    with _scaling_lock:
+        _pool_usage[key] += 1
+
+    # Use timeout to prevent indefinite blocking if pool is exhausted
     try:
-        # Track usage for scaling decisions
-        with _scaling_lock:
-            _pool_usage[key] += 1
-        
-        # Use timeout to prevent indefinite blocking if pool is exhausted
         driver = _driver_pools[key].get(timeout=timeout_seconds)
         return driver
     except queue.Empty:
@@ -227,7 +264,10 @@ def _get_driver(js_strategy: str, timeout_seconds: int = 30) -> webdriver.Chrome
                 return driver
             except queue.Empty:
                 pass
-        raise TimeoutException(f"No available drivers in {key} pool after {timeout_seconds}s. Pool exhausted at size {_pool_sizes[key]}.")
+        # Decrement usage counter since we failed to acquire a driver
+        with _scaling_lock:
+            _pool_usage[key] = max(0, _pool_usage[key] - 1)
+        raise TimeoutException(f"No available drivers in {key} pool after {timeout_seconds}s. Pool exhausted at size {_pool_sizes[key]}.") from None
 
 
 def _return_driver(driver: webdriver.Chrome):
@@ -241,7 +281,7 @@ def _return_driver(driver: webdriver.Chrome):
         
         # Basic health check - if driver is broken, don't return it
         try:
-            driver.current_url  # Simple check to see if driver is responsive
+            _ = driver.current_url  # Simple check to see if driver is responsive
         except Exception:
             # Driver is broken, create a new one to replace it
             try:
@@ -275,66 +315,75 @@ def _return_driver(driver: webdriver.Chrome):
 
 def _maybe_scale_pool(key: str):
     """Check if pool should be scaled up based on usage."""
+    should_scale = False
+    page_load_strategy = 'eager' if key == 'eager' else 'normal'
     with _scaling_lock:
         current_size = _pool_sizes[key]
         current_usage = _pool_usage[key]
         available = _driver_pools[key].qsize()
-        
-        # Scale up if usage is high and we're near capacity
         usage_ratio = current_usage / max(current_size, 1)
-        if (usage_ratio >= settings.selenium_scale_threshold and 
-            available <= 1 and 
-            current_size < settings.selenium_max_pool_size):
-            
-            # Add one more driver
-            try:
-                page_load_strategy = 'eager' if key == 'eager' else 'normal'
-                new_driver = _create_driver(page_load_strategy=page_load_strategy)
-                _driver_pools[key].put(new_driver)
-                _pool_sizes[key] += 1
-                logger.info(f"Scaled up {key} pool to {_pool_sizes[key]} drivers (usage: {current_usage})")
-            except Exception as e:
-                logger.error(f"Failed to scale up {key} pool: {e}")
+        if (usage_ratio >= settings.selenium_scale_threshold and
+                available <= 1 and
+                current_size < settings.selenium_max_pool_size):
+            # Reserve the slot before releasing the lock so two threads don't
+            # both decide to create a driver at the same time.
+            _pool_sizes[key] += 1
+            should_scale = True
+
+    if should_scale:
+        try:
+            new_driver = _create_driver(page_load_strategy=page_load_strategy)
+            _driver_pools[key].put(new_driver)
+            logger.info(f"Scaled up {key} pool to {_pool_sizes[key]} drivers (usage: {current_usage})")
+        except Exception as e:
+            # Roll back the reserved slot on failure
+            with _scaling_lock:
+                _pool_sizes[key] = max(settings.selenium_pool_size, _pool_sizes[key] - 1)
+            logger.warning(f"Failed to scale up {key} pool: {e}")
 
 
 def _try_emergency_scale(key: str) -> bool:
     """Emergency scaling when pool is completely exhausted."""
+    page_load_strategy = 'eager' if key == 'eager' else 'normal'
     with _scaling_lock:
-        current_size = _pool_sizes[key]
-        if current_size < settings.selenium_max_pool_size:
-            try:
-                page_load_strategy = 'eager' if key == 'eager' else 'normal'
-                new_driver = _create_driver(page_load_strategy=page_load_strategy)
-                _driver_pools[key].put(new_driver)
-                _pool_sizes[key] += 1
-                logger.info(f"Emergency scaled {key} pool to {_pool_sizes[key]} drivers")
-                return True
-            except Exception as e:
-                logger.error(f"Emergency scaling failed for {key} pool: {e}")
+        if _pool_sizes[key] >= settings.selenium_max_pool_size:
+            return False
+        _pool_sizes[key] += 1  # Reserve slot before releasing lock
+    try:
+        new_driver = _create_driver(page_load_strategy=page_load_strategy)
+        _driver_pools[key].put(new_driver)
+        logger.info(f"Emergency scaled {key} pool to {_pool_sizes[key]} drivers")
+        return True
+    except Exception as e:
+        with _scaling_lock:
+            _pool_sizes[key] = max(settings.selenium_pool_size, _pool_sizes[key] - 1)
+        logger.warning(f"Emergency scaling failed for {key} pool: {e}")
         return False
 
 
 def _maybe_scale_down(key: str):
     """Check if pool should be scaled down when usage is low."""
+    idle_driver = None
     with _scaling_lock:
         current_size = _pool_sizes[key]
         current_usage = _pool_usage[key]
         available = _driver_pools[key].qsize()
-        min_size = settings.selenium_pool_size  # Don't go below initial size
-        
-        # Scale down if we have too many idle drivers
-        if (current_size > min_size and 
-            available > current_size * 0.7 and  # 70% of drivers are idle
-            current_usage < current_size * 0.3):  # Low usage
-            
+        min_size = settings.selenium_pool_size
+        if (current_size > min_size and
+                available > current_size * 0.7 and
+                current_usage < current_size * 0.3):
             try:
-                # Remove one idle driver
                 idle_driver = _driver_pools[key].get_nowait()
-                idle_driver.quit()
                 _pool_sizes[key] -= 1
-                logger.info(f"Scaled down {key} pool to {_pool_sizes[key]} drivers (usage: {current_usage})")
-            except (queue.Empty, Exception):
-                pass  # No idle drivers or cleanup failed
+            except queue.Empty:
+                pass
+
+    if idle_driver is not None:
+        try:
+            idle_driver.quit()
+            logger.info(f"Scaled down {key} pool to {_pool_sizes[key]} drivers")
+        except Exception:
+            pass
 
 
 def get_pool_stats() -> dict:
@@ -556,17 +605,19 @@ def _wait_for_mathjax(driver: webdriver.Chrome, timeout_ms: int = 5000) -> bool:
 def _attempt_with_temp_driver(
     url: str,
     timeout_seconds: int,
-    proxy: Optional[str],
+    proxy: str | None,
     max_bytes: int,
     js_strategy: str = "accuracy",
-    budget_left: Optional[float] = None,
-) -> Optional[Tuple[int, str, bytes, Optional[str]]]:
+    budget_left: float | None = None,
+    allow_insecure_ssl: bool | None = None,
+) -> tuple[int, str, bytes, str | None] | None:
     """One-shot retry using a fresh driver with a rotated user agent.
 
     Lightweight and strictly budget-bounded to avoid long stalls.
     """
     ua = pick_user_agent(settings.default_user_agent)
-    temp = _create_driver(proxy=proxy, user_agent=ua)
+    eff_ssl = allow_insecure_ssl if allow_insecure_ssl is not None else settings.allow_insecure_ssl
+    temp = _create_driver(proxy=proxy, user_agent=ua, allow_insecure_ssl=eff_ssl)
     try:
         # Bound by remaining budget if provided
         effective_to = min(timeout_seconds, int(max(1.0, budget_left))) if budget_left else timeout_seconds
@@ -600,21 +651,6 @@ def _attempt_with_temp_driver(
         except Exception:
             pass
 
-        # Skip heavy SPA waits here; do a very light stabilization only
-        try:
-            is_spa = temp.execute_script(
-                """
-                return !!(window.React || window.Vue || window.angular || 
-                         document.querySelector('[data-reactroot]') ||
-                         document.querySelector('[ng-app]') ||
-                         document.querySelector('.vue-app'));
-                """
-            )
-        except Exception:
-            is_spa = False
-
-        # Skip SPA processing - not needed for educational content
-
         # MathJax: only if present and with a small cap for non-accuracy
         try:
             has_mj = temp.execute_script("return !!(window.MathJax && MathJax.typesetPromise);")
@@ -643,47 +679,8 @@ def _attempt_with_temp_driver(
 
 
 def _detect_error_pages(content: str) -> bool:
-    """Detect if content indicates an error page (404, 500, etc.)."""
-    error_patterns = [
-        # German patterns
-        "seite wurde nicht gefunden",
-        "seite nicht gefunden", 
-        "fehler 404",
-        "404 fehler",
-        "seite existiert nicht",
-        "gewünschte seite",
-        "server fehler",
-        "interner fehler",
-        "temporär nicht verfügbar",
-        
-        # English patterns
-        "page not found",
-        "404 error",
-        "not found",
-        "page does not exist",
-        "server error",
-        "internal error",
-        "temporarily unavailable",
-        "access denied",
-        
-        # Bot detection patterns
-        "verifying you are human",
-        "checking your browser",
-        "cloudflare",
-        "bot protection",
-        "security check",
-        "please wait",
-        "loading...",
-        "javascript required",
-        "javascript wird benötigt",
-        "enable javascript",
-    ]
-    
-    content_lower = content.lower()
-    for pattern in error_patterns:
-        if pattern in content_lower:
-            return True
-    return False
+    """Detect if content indicates an error page. Delegates to shared utils implementation."""
+    return detect_error_page(content, status_code=None)
 
 
 class TimeBudget:
@@ -716,29 +713,40 @@ def _selenium_fetch(
     url: str,
     timeout_seconds: int,
     retries: int,
-    proxy: Optional[str],
+    proxy: str | None,
     user_agent: str,
     max_bytes: int,
-    wait_for_selectors: Optional[list[str]] = None,
-    wait_for_ms: Optional[int] = None,
+    wait_for_selectors: list[str] | None = None,
+    wait_for_ms: int | None = None,
     js_strategy: str = "accuracy",
-) -> Tuple[int, str, bytes, Optional[str]]:
+    allow_insecure_ssl: bool | None = None,
+    take_screenshot: bool = False,
+) -> tuple[int, str, bytes, str | None, bytes | None]:
     """Fetch URL using Selenium with enhanced SPA and error handling."""
     def _sync_fetch():
         driver = None
+
+        def _snap() -> bytes | None:
+            """Capture viewport screenshot from the current driver state."""
+            if not take_screenshot or driver is None:
+                return None
+            try:
+                return driver.get_screenshot_as_png()
+            except Exception:
+                return None
         try:
             # Get driver with timeout to prevent indefinite blocking
             driver = _get_driver(js_strategy, timeout_seconds=min(timeout_seconds, 30))
         except Exception as e:
-            raise WebDriverException(f"Failed to acquire driver from pool: {e}")
+            raise WebDriverException(f"Failed to acquire driver from pool: {e}") from e
         
         try:
             budget = TimeBudget(timeout_seconds)
     
             try:
                 # Set timeouts
-                # Cap navigation timeout for speed to avoid long stalls (aggressive)
-                nav_cap = 8 if js_strategy == "speed" else min(8, timeout_seconds)
+                # Cap navigation timeout for speed to avoid long stalls; accuracy uses full budget
+                nav_cap = 8 if js_strategy == "speed" else timeout_seconds
                 driver.set_page_load_timeout(max(1, int(min(nav_cap, budget.left()))))
                 # Strategy-based implicit wait: both use 0 for explicit control
                 driver.implicitly_wait(0)
@@ -814,7 +822,7 @@ def _selenium_fetch(
                                 content = ""
                             final_url = driver.current_url
                             content_bytes = content.encode("utf-8")[:max_bytes]
-                            return 200, final_url, content_bytes, "text/html; charset=utf-8"
+                            return 200, final_url, content_bytes, "text/html; charset=utf-8", _snap()
                         
                         # Accuracy mode: use speed-like approach with longer settle
                         if js_strategy == "accuracy" and budget.ok():
@@ -826,7 +834,7 @@ def _selenium_fetch(
                                 content = ""
                             final_url = driver.current_url
                             content_bytes = content.encode("utf-8")[:max_bytes]
-                            return 200, final_url, content_bytes, "text/html; charset=utf-8"
+                            return 200, final_url, content_bytes, "text/html; charset=utf-8", _snap()
                         
                         # Get page source and URL
                         try:
@@ -870,26 +878,26 @@ def _selenium_fetch(
                                     )
                                 if isinstance(status_code, int) and status_code >= 400:
                                     content_bytes = content.encode("utf-8")[:max_bytes]
-                                    return status_code, final_url, content_bytes, "text/html; charset=utf-8"
+                                    return status_code, final_url, content_bytes, "text/html; charset=utf-8", _snap()
                             except Exception:
                                 pass
                             # If still looks like an error (but HTTP may be 200), try a one-off UA-rotated attempt
                             alt = None
                             if js_strategy != "speed" and budget.left() > 3.0:
-                                alt = _attempt_with_temp_driver(url, timeout_seconds, proxy, max_bytes, js_strategy, budget.left())
+                                alt = _attempt_with_temp_driver(url, timeout_seconds, proxy, max_bytes, js_strategy, budget.left(), allow_insecure_ssl)
                             if alt:
-                                return alt
+                                return (*alt, None)
                         
                         # If page content is suspiciously short, attempt UA-rotated retry once
                         if len(content) < 1200 and js_strategy != "speed" and budget.left() > 3.0:
-                            alt = _attempt_with_temp_driver(url, timeout_seconds, proxy, max_bytes, js_strategy, budget.left())
+                            alt = _attempt_with_temp_driver(url, timeout_seconds, proxy, max_bytes, js_strategy, budget.left(), allow_insecure_ssl)
                             if alt:
-                                return alt
+                                return (*alt, None)
                         
                         # Enforce max_bytes
                         content_bytes = content.encode("utf-8")[:max_bytes]
                         
-                        return 200, final_url, content_bytes, "text/html; charset=utf-8"
+                        return 200, final_url, content_bytes, "text/html; charset=utf-8", _snap()
                         
                     except Exception as e:
                         last_exc = e
@@ -906,6 +914,7 @@ def _selenium_fetch(
                                         url,
                                         timeout_seconds=timeout_seconds,
                                         proxy=proxy,
+                                        allow_insecure_ssl=allow_insecure_ssl,
                                         max_bytes=max_bytes,
                                         js_strategy="accuracy",
                                         budget_left=budget.left(),
@@ -921,8 +930,9 @@ def _selenium_fetch(
                         backoff = min(2 ** attempt, 5)
                         time.sleep(min(backoff, budget.left()))
                     finally:
-                        # Restore CDP blocked URLs so pooled driver does not leak settings
-                        if js_strategy == "speed" and blocked_applied:
+                        # Restore CDP blocked URLs so pooled driver does not carry
+                        # stale network-blocking state into future requests.
+                        if blocked_applied:
                             try:
                                 driver.execute_cdp_cmd('Network.setBlockedURLs', {'urls': []})
                             except Exception:
@@ -936,12 +946,13 @@ def _selenium_fetch(
                                 url,
                                 timeout_seconds=timeout_seconds,
                                 proxy=proxy,
+                                allow_insecure_ssl=allow_insecure_ssl,
                                 max_bytes=max_bytes,
                                 js_strategy="accuracy",
                                 budget_left=budget.left(),
                             )
                             if alt:
-                                return alt
+                                return (*alt, None)
                     except Exception:
                         pass
                     raise last_exc
@@ -950,8 +961,7 @@ def _selenium_fetch(
             finally:
                 _return_driver(driver)
         except Exception as e:
-            raise WebDriverException(f"Failed to fetch URL: {e}")
-        return None
+            raise WebDriverException(f"Failed to fetch URL: {e}") from e
 
     return _sync_fetch()
 
@@ -960,23 +970,26 @@ async def fetch_with_playwright(
     url: str,
     timeout_seconds: int = 30,
     retries: int = 1,
-    proxy: Optional[str] = None,
-    user_agent: Optional[str] = None,
+    proxy: str | None = None,
+    user_agent: str | None = None,
     max_bytes: int = 50 * 1024 * 1024,
     headless: bool = True,
     stealth: bool = True,
-    wait_for_selectors: Optional[list[str]] = None,
-    wait_for_ms: Optional[int] = None,
+    wait_for_selectors: list[str] | None = None,
+    wait_for_ms: int | None = None,
     js_strategy: str = "accuracy",
-) -> Tuple[int, str, bytes, Optional[str]]:
+    allow_insecure_ssl: bool | None = None,
+    take_screenshot: bool = False,
+) -> tuple[int, str, bytes, str | None, bytes | None]:
     """
     Selenium-based fetching with driver pool (renamed for compatibility).
-    Returns: (status_code, final_url, content_bytes, content_type)
+    Returns: (status_code, final_url, content_bytes, content_type, screenshot_png | None)
     """
     return await run_in_threadpool(
         _selenium_fetch,
         url, timeout_seconds, retries, proxy, user_agent, max_bytes,
-        wait_for_selectors, wait_for_ms, js_strategy
+        wait_for_selectors, wait_for_ms, js_strategy, allow_insecure_ssl,
+        take_screenshot,
     )
 
 

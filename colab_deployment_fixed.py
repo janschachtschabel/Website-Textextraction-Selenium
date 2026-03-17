@@ -53,13 +53,14 @@ os.environ.update({
     "GLOBAL_RATE_LIMIT_RPS":     "0",
     "DEFAULT_DOMAIN_RATE_LIMIT_RPS": "0",
     "MEDIA_CONVERSION_POLICY":   "skip",
+    "CHROME_BINARY":              "/usr/bin/google-chrome",
 })
 
 # Install system packages
 print("📦 Installing system packages...")
 subprocess.run("sudo apt-get update -qq && sudo apt-get install -y git", shell=True, check=True)
 
-# Install Chrome — skip if already present, otherwise try simple apt-get first
+# Install Chrome — skip if already present, otherwise download .deb directly
 print("🌐 Installing Google Chrome...")
 _chrome_present = subprocess.run(
     ["which", "google-chrome-stable"], capture_output=True
@@ -70,24 +71,13 @@ _chrome_present = subprocess.run(
 if _chrome_present:
     print("✅ Google Chrome already installed — skipping")
 else:
-    # Simple apt-get install (works in most Colab runtimes)
-    _r = subprocess.run(
-        "sudo apt-get update -qq && sudo apt-get install -y google-chrome-stable",
-        shell=True,
+    subprocess.run(
+        "wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
+        " -O /tmp/google-chrome-stable.deb",
+        shell=True, check=True,
     )
-    if _r.returncode != 0:
-        # Fallback: add Google's signing key + repo manually
-        print("   apt-get failed, adding Google repo manually...")
-        subprocess.run(
-            "curl -fsSL https://dl.google.com/linux/linux_signing_key.pub "
-            "| sudo gpg --dearmor --yes "
-            "-o /usr/share/keyrings/google-chrome-keyring.gpg && "
-            "echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] "
-            "http://dl.google.com/linux/chrome/deb/ stable main' "
-            "| sudo tee /etc/apt/sources.list.d/google-chrome.list > /dev/null && "
-            "sudo apt-get update -qq && sudo apt-get install -y google-chrome-stable",
-            shell=True, check=True,
-        )
+    subprocess.run("sudo dpkg -i /tmp/google-chrome-stable.deb", shell=True)
+    subprocess.run("sudo apt-get install -f -y -q", shell=True, check=True)
     print("✅ Google Chrome installed")
 
 # Install Cloudflare Tunnel
@@ -163,7 +153,7 @@ os.chdir("/content/Website-Textextraction-Selenium")
 # =============================================================================
 
 def check_fastapi_health(port=8000, max_attempts=40):
-    """Waits until /health reports status=ok (Selenium pool must be ready)."""
+    """Waits until the API is ready. Accepts /health (200) or falls back to /docs (200)."""
     for attempt in range(max_attempts):
         try:
             response = requests.get(f"http://localhost:{port}/health", timeout=3)
@@ -178,6 +168,16 @@ def check_fastapi_health(port=8000, max_attempts=40):
                         print(f"⏳ API running, Selenium pools still warming... (attempt {attempt + 1}/{max_attempts})")
                         time.sleep(3)
                         continue
+                else:
+                    # Unexpected 200 body — still treat as up
+                    print(f"✅ API responding (attempt {attempt + 1}) — body: {str(data)[:120]}")
+                    return True
+            elif response.status_code == 404:
+                # /health route not found — old repo version; confirm via /docs
+                docs = requests.get(f"http://localhost:{port}/docs", timeout=3)
+                if docs.status_code == 200:
+                    print(f"⚠️  /health returned 404 (repo may be outdated) but API is up — continuing")
+                    return True
         except requests.exceptions.RequestException:
             pass
 
@@ -190,7 +190,6 @@ def run_fastapi():
     """Starts FastAPI (2 workers, no --reload in Colab)."""
     print("🚀 Starting API server (Performance Setting: 2 workers, pool 2→4)...")
     os.chdir("/content/Website-Textextraction-Selenium")
-    _patch_chrome_for_colab()
 
     process = subprocess.Popen(
         ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"],
@@ -200,21 +199,13 @@ def run_fastapi():
         bufsize=1,
     )
 
-    for line in process.stdout:
-        print(line.strip())
-        if "Application startup complete" in line:
-            print("✅ API server ready")
-            break
-
-    # Drain remaining pipe output in background to prevent buffer-full deadlock.
-    # Without this, uvicorn workers block on stdout writes and stop serving requests.
-    def _drain_stdout():
-        try:
-            for _ in process.stdout:
-                pass
-        except Exception:
-            pass
-    threading.Thread(target=_drain_stdout, daemon=True).start()
+    # Stream ALL output to cell in a background thread — never break the loop.
+    # A break would stop draining the pipe; the 64 KB OS buffer fills up;
+    # workers block on stdout writes and stop responding to HTTP requests.
+    def _stream():
+        for line in process.stdout:
+            print(line.rstrip(), flush=True)
+    threading.Thread(target=_stream, daemon=True).start()
 
 def start_cloudflare_tunnel(port):
     """Starts Cloudflare Tunnel and extracts the public URL."""

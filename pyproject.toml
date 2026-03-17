@@ -1,0 +1,124 @@
+# ---------------------------------------------------------------------------
+# Build system
+# ---------------------------------------------------------------------------
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# ---------------------------------------------------------------------------
+# Project metadata
+# ---------------------------------------------------------------------------
+[project]
+name = "volltextextraktion-selenium-md"
+version = "0.2.0"
+description = "Web full-text extraction service: crawl → Markdown via HTTP/Selenium + optional LLM postprocessing"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+
+dependencies = [
+    # Web framework + ASGI server
+    "fastapi[standard]>=0.135.1",
+    "uvicorn[standard]>=0.42.0",
+
+    # HTTP client (http2 extra required for h2 support)
+    "httpx[http2]>=0.28.1",
+
+    # Browser automation
+    "selenium>=4.41.0",
+    "webdriver-manager>=4.0.2",
+
+    # Markdown / HTML extraction
+    "markitdown[all]>=0.1.5",
+    "trafilatura>=2.0.0",
+    "beautifulsoup4>=4.14.3",
+    "lxml>=5.3.0",
+
+    # Utilities
+    "python-dotenv>=1.0.1",
+    "tqdm>=4.66.0",
+    "cachetools>=7.0.0",
+    "loguru>=0.7.3",
+    "truststore>=0.10.0",  # OS certificate store (Windows/macOS/Linux) instead of certifi-only
+    "aiolimiter>=1.1.0",   # async token-bucket rate limiter (per-domain + global)
+    "diskcache>=5.6.0",    # process-safe shared cache (SQLite-backed, works across uvicorn workers)
+    "presidio-analyzer>=2.2.0",   # PII detection (NER via spacy)
+    "presidio-anonymizer>=2.2.0", # PII replacement/redaction
+    "spacy>=3.7.0",               # NLP engine for Presidio
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.11.0",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "httpx>=0.28.1",   # for TestClient
+]
+loadtest = [
+    "aiohttp>=3.9.0",
+    "matplotlib>=3.9.0",
+    "numpy>=1.26.0",
+]
+
+# ---------------------------------------------------------------------------
+# Package discovery
+# ---------------------------------------------------------------------------
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+# ---------------------------------------------------------------------------
+# Hatch environments (run with: hatch run serve / hatch run dev)
+# ---------------------------------------------------------------------------
+[tool.hatch.envs.default]
+dependencies = []  # inherits project.dependencies via editable install
+
+[tool.hatch.envs.default.scripts]
+serve    = "python run.py"
+dev      = "uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+lint     = "ruff check app/"
+fmt      = "ruff format app/"
+loadtest = "python helper/loadtest.py"
+
+# ---------------------------------------------------------------------------
+# Ruff – linter + formatter configuration
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    "E501",    # line too long (handled by formatter)
+    "B008",    # do not perform function calls in default arguments (FastAPI dependency injection)
+    "SIM117",  # nested with statements (readability preference)
+    "UP007",   # X | Y union syntax (keep Optional for compatibility)
+    "RUF001",  # ambiguous unicode in strings (intentional en-dashes / special chars)
+    "RUF002",  # ambiguous unicode in docstrings (intentional: × in resolutions, – in ranges)
+    "RUF003",  # ambiguous unicode in comments (intentional en-dashes)
+    "SIM105",  # contextlib.suppress – try/except/pass is clearer in complex control flow
+]
+
+[tool.ruff.lint.per-file-ignores]
+"app/schemas.py" = ["UP006", "UP007", "UP035"]  # keep List/Optional for Pydantic compat
+"colab_deployment_fixed.py" = ["E402"]  # intentional: print() before imports in Colab script
+"app/llm.py" = ["F404", "E402", "F821", "F401"]  # module raises ImportError at line 4; dead code below
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

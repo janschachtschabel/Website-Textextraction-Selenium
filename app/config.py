@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from dotenv import load_dotenv
 
+from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -29,11 +29,14 @@ def _get_int(name: str, default: int) -> int:
 class Settings:
     host: str = os.getenv("HOST", "0.0.0.0")
     port: int = _get_int("PORT", 8000)
+    log_level: str = os.getenv("LOG_LEVEL", "INFO").upper()
+    log_json: bool = _get_bool("LOG_JSON", False)
+    # Optional Bearer-Token for API authentication (empty = auth disabled)
+    api_key: str | None = os.getenv("API_KEY") or None
 
-    # LLM
-    llm_base_url: str | None = os.getenv("LLM_BASE_URL") or "https://api.openai.com/v1"
-    llm_model: str | None = os.getenv("LLM_MODEL") or "gpt-5-mini"
-    llm_api_key: str | None = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+    # Presidio PII anonymization (spacy models)
+    presidio_de_model: str = os.getenv("PRESIDIO_DE_MODEL", "de_core_news_lg")
+    presidio_en_model: str = os.getenv("PRESIDIO_EN_MODEL", "en_core_web_lg")
 
     # Crawl defaults
     default_mode: str = os.getenv("DEFAULT_MODE", "auto")
@@ -67,13 +70,28 @@ class Settings:
     media_conversion_policy: str = (os.getenv("MEDIA_CONVERSION_POLICY", "skip").strip().lower())
     # Security: allow disabling SSL verification globally (use with care)
     allow_insecure_ssl: bool = _get_bool("ALLOW_INSECURE_SSL", False)
+    # SSRF protection: block requests to private/loopback IPs (recommended: true)
+    ssrf_protection: bool = _get_bool("SSRF_PROTECTION", True)
     # HTML converter selection: trafilatura|markitdown|bs4
     html_converter: str = os.getenv("HTML_CONVERTER", "trafilatura").strip().lower()
     # Trafilatura mode: cleaned main content (true) vs raw html2txt (false)
     trafilatura_clean_markdown: bool = _get_bool("TRAFILATURA_CLEAN_MARKDOWN", True)
+    # Result cache: TTL in seconds (0 = disabled)
+    result_cache_ttl: int = _get_int("RESULT_CACHE_TTL", 300)
+    # Max cache size in MB (used by diskcache as size_limit; 0 = unlimited)
+    result_cache_max_size: int = _get_int("RESULT_CACHE_MAX_SIZE", 200)
+    # Directory for diskcache storage; empty = system temp dir
+    result_cache_dir: str = os.getenv("RESULT_CACHE_DIR", "")
+
+    # Rate limiting (0 = disabled)
+    # Global cap: max total crawl requests per second across all domains
+    global_rate_limit_rps: float = float(os.getenv("GLOBAL_RATE_LIMIT_RPS", "0"))
+    # Per-domain default: max requests per second to any single domain
+    default_domain_rate_limit_rps: float = float(os.getenv("DEFAULT_DOMAIN_RATE_LIMIT_RPS", "0"))
+
+    # Uvicorn worker processes (multiprocessing; 1 = single-process dev mode)
+    # Note: each worker has its own in-memory cache and metrics — use Redis for shared state
+    uvicorn_workers: int = _get_int("UVICORN_WORKERS", 4)
 
 
 settings = Settings()
-
-if settings.selenium_max_pool_size < settings.selenium_pool_size:
-    raise ValueError("SELENIUM_MAX_POOL_SIZE must be >= SELENIUM_POOL_SIZE")
