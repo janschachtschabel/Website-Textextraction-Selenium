@@ -3,6 +3,8 @@
 Lightweight FastAPI service for asynchronously crawling web pages and automatically converting
 them to structured Markdown – with local PII anonymisation (Presidio) and screenshot support.
 
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://drive.google.com/file/d/1iZ9QizEUcnvcMLYbvwmzvGPYKAYQJ9DD/view?usp=sharing)
+
 ## Features
 
 - **Three crawl modes**: `fast` (httpx/HTTP2), `js` (Selenium Chrome), `auto` (preflight analysis)
