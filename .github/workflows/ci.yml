@@ -1,0 +1,43 @@
+name: extraction checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install -e '.[dev,documents,loadtest]'
+      - run: ruff check app tests helper/loadtest.py
+      - run: pytest -q -m 'not selenium'
+      - run: python -m compileall -q app helper run.py
+      - run: python -m build --no-isolation
+  selenium:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: browser-actions/setup-chrome@v2
+        id: chrome
+        with:
+          chrome-version: stable
+          install-chromedriver: true
+          install-dependencies: true
+      - run: python -m pip install -e '.[dev,documents]'
+      - run: pytest -q tests/test_selenium_integration.py
+        env:
+          RUN_SELENIUM_TESTS: '1'
+          CHROME_BINARY: ${{ steps.chrome.outputs.chrome-path }}
+          CHROMEDRIVER_PATH: ${{ steps.chrome.outputs.chromedriver-path }}
