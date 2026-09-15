@@ -1,173 +1,94 @@
-from __future__ import annotations
-
+"""One bounded streaming path, with guarded redirects and no shared cookie jar."""
 import asyncio
 import ssl
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from urllib.parse import urljoin
 
 import httpx
 
-from .config import settings
+from .deadline import Deadline
+from .results import CrawlError, FetchResult
+from .schemas import CrawlOptions
+from .security import resolve_target
 
-try:
-    import truststore
-    _TRUSTSTORE_AVAILABLE = True
-except ImportError:
-    _TRUSTSTORE_AVAILABLE = False
-
-# ---------------------------------------------------------------------------
-# SSL context – created once at import time, reused for every request.
-# truststore uses the OS certificate store (Windows CertStore / macOS Keychain
-# / Linux system certs) so corporate/proxy CAs are trusted automatically.
-# ---------------------------------------------------------------------------
-def _build_ssl_context() -> bool | ssl.SSLContext:
-    if _TRUSTSTORE_AVAILABLE:
-        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    return True  # fall back to certifi bundle
-
-_SSL_CONTEXT: bool | ssl.SSLContext = _build_ssl_context()
-
-DEFAULT_HEADERS = {
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
-    "Upgrade-Insecure-Requests": "1",
-    # Some sites check these
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-}
-
-# ---------------------------------------------------------------------------
-# Persistent httpx client – one instance for the entire process lifetime.
-# Eliminates per-request TCP + TLS handshake and enables HTTP/2 multiplexing.
-# A separate short-lived client is created only when allow_insecure_ssl=True.
-# ---------------------------------------------------------------------------
-_persistent_client: httpx.AsyncClient | None = None
+RETRY_STATUSES = {429, 500, 502, 503, 504}
 
 
-def _make_client(verify: bool | ssl.SSLContext, proxy: str | None = None) -> httpx.AsyncClient:
-    kwargs: dict = {
-        "follow_redirects": True,
-        "headers": DEFAULT_HEADERS,
-        "limits": httpx.Limits(
-            max_connections=200,
-            max_keepalive_connections=40,
-            keepalive_expiry=30,
-        ),
-        "http2": True,
-        "verify": verify,
-    }
-    if proxy:
-        kwargs["proxy"] = proxy
-    return httpx.AsyncClient(**kwargs)
-
-
-async def init_http_client() -> None:
-    """Create the persistent client. Call once from the FastAPI lifespan."""
-    global _persistent_client
-    _persistent_client = _make_client(_SSL_CONTEXT)
-
-
-async def close_http_client() -> None:
-    """Gracefully close the persistent client. Call once from the FastAPI lifespan."""
-    global _persistent_client
-    if _persistent_client is not None:
-        await _persistent_client.aclose()
-        _persistent_client = None
-
-
-def get_http_client() -> httpx.AsyncClient:
-    """Return the shared persistent client (must be initialised first)."""
-    if _persistent_client is None:
-        raise RuntimeError("HTTP client not initialised – call init_http_client() in lifespan")
-    return _persistent_client
-
-
-# Status codes that warrant a retry (server-side transient errors + rate-limit)
-_RETRY_STATUSES = {429, 500, 502, 503, 504}
-
-
-async def fetch_with_httpx(
-    url: str,
-    timeout_seconds: int,
-    retries: int,
-    proxy: str | None,
-    user_agent: str,
-    max_bytes: int,
-    allow_insecure_ssl: bool | None = None,
-) -> tuple[int, str, bytes, str | None]:
-    """
-    Returns: (status_code, final_url, content_bytes, content_type)
-    """
-    req_headers = {"User-Agent": user_agent}
-    timeout = httpx.Timeout(timeout_seconds)
-
-    # Use persistent client unless insecure SSL is requested (rare test override)
-    insecure = allow_insecure_ssl if allow_insecure_ssl is not None else settings.allow_insecure_ssl
-    if insecure:
-        # Short-lived client – only created for the insecure path
-        async with _make_client(verify=False, proxy=proxy) as client:
-            return await _do_fetch(client, url, req_headers, timeout, max_bytes, retries)
-
-    client = get_http_client()
-    # Proxy requests need a dedicated client (proxy is set at client level in httpx)
-    if proxy:
-        async with _make_client(_SSL_CONTEXT, proxy=proxy) as pclient:
-            return await _do_fetch(pclient, url, req_headers, timeout, max_bytes, retries)
-
-    return await _do_fetch(client, url, req_headers, timeout, max_bytes, retries)
-
-
-async def _do_fetch(
-    client: httpx.AsyncClient,
-    url: str,
-    extra_headers: dict,
-    timeout: httpx.Timeout,
-    max_bytes: int,
-    retries: int,
-) -> tuple[int, str, bytes, str | None]:
-    last_exc: Exception | None = None
-    last_status: int = 0
-    for attempt in range(retries + 1):
+def retry_delay(value: str | None, attempt: int) -> float:
+    if value:
         try:
-            # Stream to enforce max_bytes
-            async with client.stream("GET", url, headers=extra_headers, timeout=timeout) as resp:
-                status = resp.status_code
-                final_url = str(resp.url)
-                ctype = resp.headers.get("content-type")
+            return min(30, max(0, float(value)))
+        except ValueError:
+            try:
+                return min(30, max(0, (parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds()))
+            except (ValueError, TypeError, OverflowError):
+                pass  # Invalid Retry-After: use bounded exponential backoff.
+    return min(2 ** attempt, 8)
+
+
+class HTTPFetcher:
+    def __init__(self, proxy_url: str | None = None, *, transport=None, validate=resolve_target, acquire=None, max_connections=16):
+        if transport is None and proxy_url is None:
+            raise ValueError('A guarded egress proxy is required')
+        self.validate = validate
+        self.acquire = acquire
+        limits = httpx.Limits(max_connections=max_connections, max_keepalive_connections=max_connections)
+        self.transports = {False: transport, True: transport} if transport else {
+            False: httpx.AsyncHTTPTransport(proxy=proxy_url, verify=ssl.create_default_context(), http2=True, limits=limits, trust_env=False),
+            True: httpx.AsyncHTTPTransport(proxy=proxy_url, verify=False, http2=True, limits=limits, trust_env=False),
+        }
+
+    async def close(self):
+        for transport in set(self.transports.values()):
+            await transport.aclose()
+
+    async def fetch(self, url: str, options: CrawlOptions, deadline: Deadline) -> FetchResult:
+        return await deadline.run(self._fetch(url, options, deadline))
+
+    async def _fetch(self, url, options, deadline):
+        for attempt in range(options.retries + 1):
+            try:
+                result, after = await self._redirects(url, options, deadline)
+                if result.status_code not in RETRY_STATUSES or attempt == options.retries:
+                    return result
+            except httpx.HTTPError as exc:
+                if attempt == options.retries:
+                    raise CrawlError('HTTP download failed') from exc
+                after = None
+            await deadline.run(asyncio.sleep(retry_delay(after, attempt)))
+        raise AssertionError('Unreachable retry state')
+
+    async def _redirects(self, url, options, deadline):
+        visited = set()
+        for _ in range(11):
+            if url in visited:
+                raise CrawlError('Redirect loop detected')
+            visited.add(url)
+            await deadline.run(asyncio.to_thread(self.validate, url))
+            if self.acquire:
+                await self.acquire(url, options.crawl_rate_limit_rps, deadline)
+            remaining = deadline.remaining()
+            request = httpx.Request('GET', url, headers={'User-Agent': options.user_agent, 'Accept-Encoding': 'identity'},
+                                    extensions={'timeout': dict.fromkeys(('connect', 'read', 'write', 'pool'), remaining)})
+            response = await self.transports[options.allow_insecure_ssl].handle_async_request(request)
+            try:
+                if response.status_code in {301, 302, 303, 307, 308} and response.headers.get('location'):
+                    url = urljoin(url, response.headers['location'])
+                    continue
                 buf = bytearray()
-                async for chunk in resp.aiter_bytes():
-                    if chunk:
-                        buf.extend(chunk)
-                        if len(buf) > max_bytes:
-                            break
-                result = status, final_url, bytes(buf[:max_bytes]), ctype
-
-            # Retry on transient server errors / rate-limit if retries remain
-            if status in _RETRY_STATUSES and attempt < retries:
-                last_status = status
-                delay = min(2 ** attempt, 8)
-                # Honour Retry-After header when present (429/503)
-                retry_after = resp.headers.get("retry-after")
-                if retry_after:
-                    try:
-                        delay = min(int(retry_after), 30)
-                    except ValueError:
-                        pass
-                await asyncio.sleep(delay)
-                continue
-
-            return result
-        except Exception as e:
-            last_exc = e
-            # Exponential backoff: skip sleep after the last attempt
-            if attempt < retries:
-                await asyncio.sleep(min(2 ** attempt, 5))
-    # Retries exhausted
-    if last_exc:
-        raise last_exc
-    if last_status:
-        # Return the last error response rather than raising
-        return last_status, url, b"", None
-    raise RuntimeError("Unknown fetch error")
+                truncated = False
+                async for chunk in response.aiter_bytes(chunk_size=65536):
+                    available = options.max_bytes - len(buf)
+                    buf.extend(chunk[:available])
+                    if len(chunk) > available:
+                        truncated = True
+                        break
+                result = FetchResult(bytes(buf), str(request.url), response.status_code,
+                                     response.headers.get('content-type'), truncated=truncated)
+                if truncated:
+                    result.warnings.append('Response truncated at max_bytes')
+                return result, response.headers.get('retry-after')
+            finally:
+                await response.aclose()
+        raise CrawlError('Too many redirects')
