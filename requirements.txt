@@ -1,12 +1,2 @@
-fastapi
-uvicorn[standard]
-httpx
-selenium
-webdriver-manager
-markitdown[all]
-trafilatura
-python-dotenv
-beautifulsoup4
-lxml
-openai
-tqdm
+# The project metadata is the single dependency source.
+-e .

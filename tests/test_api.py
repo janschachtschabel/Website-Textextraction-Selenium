@@ -1,0 +1,197 @@
+import asyncio
+from dataclasses import replace
+
+import httpx
+import pytest
+
+from app.config import settings
+from app.main import create_app
+from app.resources import Resources
+
+
+class NoBrowser:
+    async def fetch(self, *args):
+        pytest.fail("This HTTP-only result must not launch Selenium")
+
+
+@pytest.fixture
+async def api(tmp_path, article_html):
+    state = {"calls": 0, "active": 0, "peak": 0}
+
+    async def upstream(request):
+        state["calls"] += 1
+        state["active"] += 1
+        state["peak"] = max(state["peak"], state["active"])
+        try:
+            await asyncio.sleep(0.015)
+            if request.url.path == "/blocked":
+                return httpx.Response(429, content=b"<main>Rate limited</main>", headers={"content-type": "text/html"})
+            if request.url.path == "/empty":
+                return httpx.Response(200, content=b"", headers={"content-type": "text/html"})
+            return httpx.Response(200, content=article_html.encode(), headers={"content-type": "text/html"})
+        finally:
+            state["active"] -= 1
+
+    config = replace(
+        settings,
+        result_cache_dir=str(tmp_path),
+        max_concurrent_requests=1,
+        conversion_workers=1,
+        default_retries=0,
+        api_key=None,
+    )
+    resources = Resources(
+        config, transport=httpx.MockTransport(upstream), validate=lambda url: None, browser=NoBrowser()
+    )
+    app = create_app(config, resources)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            yield client, state, resources
+
+
+async def test_http_cache_coalescing_force_refresh_and_actual_engine(api):
+    client, state, _ = api
+    payload = {"url": "https://example.com/article"}
+    responses = await asyncio.gather(*(client.post("/crawl", json=payload) for _ in range(4)))
+    assert all(r.status_code == 200 and r.json()["success"] for r in responses)
+    assert state["calls"] == 1
+    assert sum(r.json()["coalesced"] for r in responses) == 3
+    response = (await client.post("/crawl", json=payload)).json()
+    assert response["cached"] and response["fetch_engine"] == "http"
+    assert response["converter"] == "trafilatura"
+    refreshed = await client.post("/crawl", json={**payload, "force_refresh": True})
+    assert refreshed.json()["cached"] is False and state["calls"] == 2
+
+
+async def test_each_batch_url_uses_global_capacity_and_errors_are_counted(api):
+    client, state, _ = api
+    response = await client.post(
+        "/crawl/batch",
+        json={
+            "urls": ["https://example.com/one", "https://example.com/blocked", "https://example.com/empty"],
+            "max_concurrency": 3,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["succeeded"], body["failed"], state["peak"]) == (1, 2, 1)
+    assert body["results"][1]["result"]["status_code"] == 429
+    assert body["results"][1]["result"]["fetch_engine"] == "http"
+    assert body["results"][2]["result"]["extraction_status"] == "empty"
+    stats = (await client.get("/stats")).json()
+    assert stats["requests_success"] == 1 and stats["requests_error"] == 2
+
+
+async def test_failed_extraction_is_not_cached_and_health_needs_no_idle_browser(api):
+    client, state, resources = api
+    for _ in range(2):
+        response = await client.post("/crawl", json={"url": "https://example.com/empty"})
+        assert not response.json()["success"]
+    assert state["calls"] == 2
+    health = await client.get("/health")
+    assert health.status_code == 200 and health.json()["status"] == "ok"
+    assert resources.browser_pool.stats()["started"] == 0
+
+
+async def test_anonymization_failure_returns_no_text_or_parallel_representation(api):
+    client, state, _ = api
+    response = await client.post(
+        "/crawl",
+        json={"url": "https://example.com/article", "anonymize": True, "extract_links": True, "screenshot": True},
+    )
+    assert response.status_code == 503
+    assert "Reflection" not in response.text
+    assert "markdown" not in response.json()
+    response = await client.post("/crawl", json={"url": "https://example.com/article", "anonymize": True})
+    assert response.status_code == 503 and state["calls"] == 2
+
+
+async def test_auth_protects_both_crawl_routes_and_stats(tmp_path):
+    config = replace(settings, result_cache_dir=str(tmp_path), api_key="fixture-key")
+    app = create_app(config)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            for path, payload in [
+                ("/crawl", {"url": "https://example.com"}),
+                ("/crawl/batch", {"urls": ["https://example.com"]}),
+            ]:
+                assert (await client.post(path, json=payload)).status_code == 401
+            assert (await client.get("/stats")).status_code == 401
+            assert (await client.get("/stats", headers={"Authorization": "Bearer fixture-key"})).status_code == 200
+            assert (await client.get("/health")).status_code == 200
+            assert (await client.get("/stats", headers={b"Authorization": b"Bearer \xff"})).status_code == 401
+
+
+async def test_auto_uses_rendered_result_and_its_success_status(api):
+    from app.results import FetchResult
+
+    client, _, resources = api
+
+    async def shell(request):
+        return httpx.Response(
+            200, content=b'<div id="root"></div><script src="app.js"></script>', headers={"content-type": "text/html"}
+        )
+
+    resources.http.transports = dict.fromkeys((False, True), httpx.MockTransport(shell))
+
+    class Browser:
+        async def fetch(self, url, options, deadline):
+            return FetchResult(
+                b"<main>Rendered lesson content.</main>", url + "/rendered", 200, "text/html", "selenium"
+            )
+
+    resources.browser = Browser()
+    result = (await client.post("/crawl", json={"url": "https://example.com/shell"})).json()
+    assert result["success"] and not result["error_page_detected"]
+    assert result["fetch_engine"] == "selenium" and "Rendered lesson content" in result["markdown"]
+
+
+def pii_backend(text, language):
+    from app.schemas import AnonymizationResult
+
+    return "[redacted]", AnonymizationResult(entities_found=["PERSON"], entity_count=1)
+
+
+async def test_only_redacted_output_is_cached_and_parallel_representations_are_suppressed(api, monkeypatch):
+    client, state, _ = api
+    monkeypatch.setattr("app.service.anonymize_document", pii_backend)
+    payload = {"url": "https://example.com/pii", "anonymize": True, "extract_links": True, "screenshot": True}
+    for cached in (False, True):
+        result = (await client.post("/crawl", json=payload)).json()
+        assert result["cached"] is cached and result["markdown"] == "[redacted]"
+        assert result["links"] is None and result["screenshot_base64"] is None
+        assert result["anonymization"]["entity_count"] == 1
+    assert state["calls"] == 1
+
+
+async def test_batch_wait_deadline_is_included_in_url_error_metrics(api):
+    client, _, resources = api
+
+    async def slow(request):
+        await asyncio.sleep(2)
+        return httpx.Response(200, content=b"late")
+
+    resources.http.transports = dict.fromkeys((False, True), httpx.MockTransport(slow))
+    response = await client.post(
+        "/crawl/batch",
+        json={"urls": ["https://example.com/a", "https://example.com/b"], "max_concurrency": 1, "timeout_ms": 1000},
+    )
+    assert response.json()["failed"] == 2
+    assert (await client.get("/stats")).json()["requests_error"] == 2
+
+
+async def test_unexpected_adapter_failure_stays_isolated_to_its_batch_item(api, article_html):
+    client, _, resources = api
+
+    def upstream(request):
+        if request.url.path == "/broken":
+            raise RuntimeError("sensitive upstream content")
+        return httpx.Response(200, content=article_html.encode(), headers={"content-type": "text/html"})
+
+    resources.http.transports = dict.fromkeys((False, True), httpx.MockTransport(upstream))
+    response = await client.post(
+        "/crawl/batch", json={"urls": ["https://example.com/broken", "https://example.com/ok"]}
+    )
+    assert response.status_code == 200
+    assert response.json()["failed"] == 1 and response.json()["succeeded"] == 1
+    assert "sensitive upstream content" not in response.text
