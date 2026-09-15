@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+"""Validated server defaults; request overrides are resolved in schemas.py."""
 import os
 from dataclasses import dataclass
 
@@ -8,90 +7,71 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def _get_bool(name: str, default: bool) -> bool:
-    val = os.getenv(name)
-    if val is None:
+def _bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
         return default
-    return val.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _get_int(name: str, default: int) -> int:
-    val = os.getenv(name)
-    if not val:
-        return default
-    try:
-        return int(val)
-    except Exception:
-        return default
+    if value.lower() not in {'1', '0', 'true', 'false', 'yes', 'no', 'on', 'off'}:
+        raise ValueError(f'{name} must be a boolean')
+    return value.lower() in {'1', 'true', 'yes', 'on'}
 
 
 @dataclass(frozen=True)
 class Settings:
-    host: str = os.getenv("HOST", "0.0.0.0")
-    port: int = _get_int("PORT", 8000)
-    log_level: str = os.getenv("LOG_LEVEL", "INFO").upper()
-    log_json: bool = _get_bool("LOG_JSON", False)
-    # Optional Bearer-Token for API authentication (empty = auth disabled)
-    api_key: str | None = os.getenv("API_KEY") or None
+    host: str = os.getenv('HOST', '0.0.0.0')
+    port: int = int(os.getenv('PORT', '8000'))
+    log_level: str = os.getenv('LOG_LEVEL', 'INFO').upper()
+    log_json: bool = _bool('LOG_JSON', False)
+    api_key: str | None = os.getenv('API_KEY') or None
+    default_mode: str = os.getenv('DEFAULT_MODE', 'auto')
+    default_timeout_seconds: int = int(os.getenv('DEFAULT_TIMEOUT_SECONDS', '120'))
+    default_retries: int = int(os.getenv('DEFAULT_RETRIES', '1'))
+    default_headless: bool = _bool('DEFAULT_HEADLESS', True)
+    default_max_bytes: int = int(os.getenv('DEFAULT_MAX_BYTES', str(10 * 1024 * 1024)))
+    default_user_agent: str = os.getenv('DEFAULT_USER_AGENT', 'WebsiteTextExtraction/0.3')
+    default_js_auto_wait: bool = _bool('DEFAULT_JS_AUTO_WAIT', True)
+    default_js_strategy: str = os.getenv('DEFAULT_JS_STRATEGY', 'speed')
+    selenium_max_pool_size: int = int(os.getenv('SELENIUM_MAX_POOL_SIZE', '2'))
+    selenium_no_sandbox: bool = _bool('SELENIUM_NO_SANDBOX', False)
+    chrome_binary: str | None = os.getenv('CHROME_BINARY') or None
+    chromedriver_path: str | None = os.getenv('CHROMEDRIVER_PATH') or None
+    conversion_workers: int = int(os.getenv('CONVERSION_WORKERS', '2'))
+    http_max_connections: int = int(os.getenv('HTTP_MAX_CONNECTIONS', '16'))
+    max_concurrent_requests: int = int(os.getenv('MAX_CONCURRENT_REQUESTS', '8'))
+    max_queue_size: int = int(os.getenv('MAX_QUEUE_SIZE', '50'))
+    queue_timeout_seconds: int = int(os.getenv('QUEUE_TIMEOUT_SECONDS', '60'))
+    media_conversion_policy: str = os.getenv('MEDIA_CONVERSION_POLICY', 'skip').lower()
+    allow_insecure_ssl: bool = _bool('ALLOW_INSECURE_SSL', False)
+    ssrf_protection: bool = _bool('SSRF_PROTECTION', True)
+    html_converter: str = os.getenv('HTML_CONVERTER', 'trafilatura').lower()
+    trafilatura_clean_markdown: bool = _bool('TRAFILATURA_CLEAN_MARKDOWN', True)
+    result_cache_ttl: int = int(os.getenv('RESULT_CACHE_TTL', '300'))
+    result_cache_max_size: int = int(os.getenv('RESULT_CACHE_MAX_SIZE', '200'))
+    result_cache_dir: str = os.getenv('RESULT_CACHE_DIR', '')
+    global_rate_limit_rps: float = float(os.getenv('GLOBAL_RATE_LIMIT_RPS', '0'))
+    default_domain_rate_limit_rps: float = float(os.getenv('DEFAULT_DOMAIN_RATE_LIMIT_RPS', '0'))
+    presidio_de_model: str = os.getenv('PRESIDIO_DE_MODEL', 'de_core_news_lg')
+    presidio_en_model: str = os.getenv('PRESIDIO_EN_MODEL', 'en_core_web_lg')
+    uvicorn_workers: int = int(os.getenv('UVICORN_WORKERS', '1'))
 
-    # Presidio PII anonymization (spacy models)
-    presidio_de_model: str = os.getenv("PRESIDIO_DE_MODEL", "de_core_news_lg")
-    presidio_en_model: str = os.getenv("PRESIDIO_EN_MODEL", "en_core_web_lg")
-
-    # Crawl defaults
-    default_mode: str = os.getenv("DEFAULT_MODE", "auto")
-    default_timeout_seconds: int = _get_int("DEFAULT_TIMEOUT_SECONDS", 120)
-    default_retries: int = _get_int("DEFAULT_RETRIES", 1)
-    default_headless: bool = _get_bool("DEFAULT_HEADLESS", True)
-    default_stealth: bool = _get_bool("DEFAULT_STEALTH", True)
-    default_max_bytes: int = _get_int("DEFAULT_MAX_BYTES", 10 * 1024 * 1024)
-    default_user_agent: str = os.getenv(
-        "DEFAULT_USER_AGENT",
-        (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/127.0.0.0 Safari/537.36"
-        ),
-    )
-
-    # Selenium settings
-    selenium_pool_size: int = _get_int("SELENIUM_POOL_SIZE", 2)
-    selenium_max_pool_size: int = _get_int("SELENIUM_MAX_POOL_SIZE", 8)  # Dynamic scaling limit
-    selenium_scale_threshold: float = float(os.getenv("SELENIUM_SCALE_THRESHOLD", "0.8"))  # Scale at 80% usage
-    default_js_auto_wait: bool = _get_bool("DEFAULT_JS_AUTO_WAIT", True)
-    # JS strategy: accuracy|speed
-    default_js_strategy: str = os.getenv("DEFAULT_JS_STRATEGY", "speed")
-    
-    # Request queuing and capacity
-    max_queue_size: int = _get_int("MAX_QUEUE_SIZE", 50)  # Maximum queued requests
-    queue_timeout_seconds: int = _get_int("QUEUE_TIMEOUT_SECONDS", 60)  # Max wait in queue
-
-    # Media handling
-    media_conversion_policy: str = (os.getenv("MEDIA_CONVERSION_POLICY", "skip").strip().lower())
-    # Security: allow disabling SSL verification globally (use with care)
-    allow_insecure_ssl: bool = _get_bool("ALLOW_INSECURE_SSL", False)
-    # SSRF protection: block requests to private/loopback IPs (recommended: true)
-    ssrf_protection: bool = _get_bool("SSRF_PROTECTION", True)
-    # HTML converter selection: trafilatura|markitdown|bs4
-    html_converter: str = os.getenv("HTML_CONVERTER", "trafilatura").strip().lower()
-    # Trafilatura mode: cleaned main content (true) vs raw html2txt (false)
-    trafilatura_clean_markdown: bool = _get_bool("TRAFILATURA_CLEAN_MARKDOWN", True)
-    # Result cache: TTL in seconds (0 = disabled)
-    result_cache_ttl: int = _get_int("RESULT_CACHE_TTL", 300)
-    # Max cache size in MB (used by diskcache as size_limit; 0 = unlimited)
-    result_cache_max_size: int = _get_int("RESULT_CACHE_MAX_SIZE", 200)
-    # Directory for diskcache storage; empty = system temp dir
-    result_cache_dir: str = os.getenv("RESULT_CACHE_DIR", "")
-
-    # Rate limiting (0 = disabled)
-    # Global cap: max total crawl requests per second across all domains
-    global_rate_limit_rps: float = float(os.getenv("GLOBAL_RATE_LIMIT_RPS", "0"))
-    # Per-domain default: max requests per second to any single domain
-    default_domain_rate_limit_rps: float = float(os.getenv("DEFAULT_DOMAIN_RATE_LIMIT_RPS", "0"))
-
-    # Uvicorn worker processes (multiprocessing; 1 = single-process dev mode)
-    # Note: each worker has its own in-memory cache and metrics — use Redis for shared state
-    uvicorn_workers: int = _get_int("UVICORN_WORKERS", 4)
+    def __post_init__(self):
+        for name in ('selenium_max_pool_size', 'conversion_workers', 'http_max_connections',
+                     'max_concurrent_requests', 'queue_timeout_seconds', 'uvicorn_workers', 'result_cache_max_size'):
+            if getattr(self, name) < 1:
+                raise ValueError(f'{name} must be positive')
+        if not 1 <= self.default_timeout_seconds <= 600:
+            raise ValueError('DEFAULT_TIMEOUT_SECONDS must be 1..600')
+        if not 0 <= self.default_retries <= 10 or not 1024 <= self.default_max_bytes <= 100 * 1024 * 1024:
+            raise ValueError('Invalid default retry or byte limit')
+        if min(self.max_queue_size, self.result_cache_ttl, self.global_rate_limit_rps, self.default_domain_rate_limit_rps) < 0:
+            raise ValueError('Queue size, TTL and rates cannot be negative')
+        for name, choices in {
+            'default_mode': {'auto', 'fast', 'js'}, 'default_js_strategy': {'accuracy', 'speed'},
+            'html_converter': {'trafilatura', 'markitdown', 'bs4'},
+            'media_conversion_policy': {'skip', 'none', 'metadata', 'full'},
+        }.items():
+            if getattr(self, name) not in choices:
+                raise ValueError(f'Invalid {name}')
 
 
 settings = Settings()

@@ -8,7 +8,8 @@ from urllib.parse import urlsplit
 
 from .config import settings
 from .html_converter import convert_html, markitdown_stream
-from .markup import decode_text, enhance_table_structure  # compatibility export
+from .markup import decode_text
+from .markup import enhance_table_structure as enhance_table_structure
 from .results import ConversionResult
 
 
