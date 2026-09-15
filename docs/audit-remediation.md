@@ -60,6 +60,13 @@ access (401), rejection of a private destination (400), and successful extractio
 with a cached repeat from a controlled local origin. Only that isolated fixture
 process disabled private-destination protection to reach its own origin.
 
+The first remote browser run failed before navigation. A direct Chrome startup
+diagnostic reproduced `No usable sandbox`: Ubuntu AppArmor did not cover the
+downloaded Chrome-for-Testing path. The CI job now uses the runner's packaged
+Chrome and matched ChromeDriver, covered by Ubuntu's existing Chrome profile.
+Sandboxing and the host's AppArmor policy remain enabled. Fixture exceptions
+include their chained cause in test output while public API errors stay sanitized.
+
 ## Design choices and compatibility
 
 The implementation follows the written remediation plan with one deliberate

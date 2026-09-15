@@ -36,6 +36,11 @@ on first use. Models are never downloaded while processing a request.
 Preinstall compatible Chrome and ChromeDriver binaries in production and set
 `CHROME_BINARY` and `CHROMEDRIVER_PATH`. Otherwise Selenium Manager locates/downloads
 them. Chrome sandboxing and TLS verification are enabled by default.
+On Ubuntu 23.10+, prefer packaged Google Chrome at its standard installation path:
+Ubuntu's AppArmor profile does not cover arbitrary downloaded Chrome binaries.
+See the [Chromium sandbox documentation](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md).
+CI uses the runner's packaged Chrome and matching ChromeDriver, and checks that
+Chrome starts with sandboxing enabled before running browser fixtures.
 
 ## Extract a page
 

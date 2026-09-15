@@ -22,26 +22,23 @@ jobs:
       - run: python -m compileall -q app helper run.py
       - run: python -m build --no-isolation
   selenium:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    env:
+      RUN_SELENIUM_TESTS: '1'
+      # The runner's packaged Chrome has Ubuntu's sandbox profile; arbitrary
+      # Chrome-for-Testing download paths cannot use it under AppArmor.
+      CHROME_BINARY: /usr/bin/google-chrome
+      CHROMEDRIVER_PATH: /usr/bin/chromedriver
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: pip
-      - uses: browser-actions/setup-chrome@v2
-        id: chrome
-        with:
-          chrome-version: stable
-          install-chromedriver: true
-          install-dependencies: true
       - run: python -m pip install -e '.[dev,documents]'
       - name: Verify Chrome can start with sandboxing enabled
-        run: timeout 15 "$CHROME_BINARY" --headless --disable-background-networking --dump-dom about:blank
-        env:
-          CHROME_BINARY: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          "$CHROME_BINARY" --version
+          "$CHROMEDRIVER_PATH" --version
+          timeout 15 "$CHROME_BINARY" --headless --disable-background-networking --dump-dom about:blank
       - run: pytest -q tests/test_selenium_integration.py
-        env:
-          RUN_SELENIUM_TESTS: '1'
-          CHROME_BINARY: ${{ steps.chrome.outputs.chrome-path }}
-          CHROMEDRIVER_PATH: ${{ steps.chrome.outputs.chromedriver-path }}
