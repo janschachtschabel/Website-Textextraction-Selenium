@@ -3,6 +3,7 @@
 Resolve once per connection, reject non-public DNS answers, then dial an IP.
 TLS remains end-to-end, so certificate checks and SNI stay with the client.
 """
+
 import asyncio
 import base64
 import ssl
@@ -14,7 +15,7 @@ from .security import Target, resolve_target
 
 
 def authority(host: str, port: int) -> str:
-    return f'[{host}]:{port}' if ':' in host else f'{host}:{port}'
+    return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
 
 
 async def dial_target(target: Target, **kwargs):
@@ -24,27 +25,31 @@ async def dial_target(target: Target, **kwargs):
             return await asyncio.open_connection(address, target.port, **kwargs)
         except OSError as exc:
             last_error = exc
-    raise CrawlError('Destination connection failed') from last_error
+    raise CrawlError("Destination connection failed") from last_error
 
 
 async def dial_upstream(target: Target, proxy: str, protection: bool):
     parsed = urlsplit(proxy)
-    proxy_url = f'{parsed.scheme}://{authority(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))}'
+    proxy_url = (
+        f"{parsed.scheme}://{authority(parsed.hostname, parsed.port or (443 if parsed.scheme == 'https' else 80))}"
+    )
     proxy_target = await asyncio.to_thread(resolve_target, proxy_url, protection)
-    tls = {'ssl': ssl.create_default_context(), 'server_hostname': proxy_target.host} if parsed.scheme == 'https' else {}
+    tls = (
+        {"ssl": ssl.create_default_context(), "server_hostname": proxy_target.host} if parsed.scheme == "https" else {}
+    )
     reader, writer = await dial_target(proxy_target, **tls)
     try:
         # The upstream proxy must not resolve the original destination again.
         destination = authority(target.addresses[0], target.port)
-        headers = f'CONNECT {destination} HTTP/1.1\r\nHost: {destination}\r\n'
+        headers = f"CONNECT {destination} HTTP/1.1\r\nHost: {destination}\r\n"
         if parsed.username is not None:
-            credentials = unquote(parsed.username) + ':' + unquote(parsed.password or '')
-            headers += 'Proxy-Authorization: Basic ' + base64.b64encode(credentials.encode()).decode() + '\r\n'
-        writer.write((headers + '\r\n').encode('ascii'))
+            credentials = unquote(parsed.username) + ":" + unquote(parsed.password or "")
+            headers += "Proxy-Authorization: Basic " + base64.b64encode(credentials.encode()).decode() + "\r\n"
+        writer.write((headers + "\r\n").encode("ascii"))
         await writer.drain()
-        response = await reader.readuntil(b'\r\n\r\n')
-        if response.split(b' ', 2)[1] != b'200':
-            raise CrawlError('Upstream proxy rejected the connection')
+        response = await reader.readuntil(b"\r\n\r\n")
+        if response.split(b" ", 2)[1] != b"200":
+            raise CrawlError("Upstream proxy rejected the connection")
         return reader, writer
     except BaseException:
         writer.close()
@@ -58,8 +63,10 @@ async def _copy(reader, writer):
 
 
 async def _relay(client_reader, client_writer, remote_reader, remote_writer):
-    tasks = [asyncio.create_task(_copy(client_reader, remote_writer)),
-             asyncio.create_task(_copy(remote_reader, client_writer))]
+    tasks = [
+        asyncio.create_task(_copy(client_reader, remote_writer)),
+        asyncio.create_task(_copy(remote_reader, client_writer)),
+    ]
     try:
         await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in tasks:
@@ -86,10 +93,10 @@ class EgressProxy:
 
     @property
     def url(self):
-        return f'http://127.0.0.1:{self.port}'
+        return f"http://127.0.0.1:{self.port}"
 
     async def __aenter__(self):
-        self.server = await asyncio.start_server(self._accept, '127.0.0.1', 0, limit=65536)
+        self.server = await asyncio.start_server(self._accept, "127.0.0.1", 0, limit=65536)
         return self
 
     def _accept(self, reader, writer):
@@ -102,42 +109,52 @@ class EgressProxy:
 
     async def __aexit__(self, *args):
         self.server.close()
-        await self.server.wait_closed()
         tasks = list(self.tasks)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        await self.server.wait_closed()
 
     async def _handle(self, reader, writer):
         remote = None
         established = False
         try:
             async with asyncio.timeout(600):
-                head = await asyncio.wait_for(reader.readuntil(b'\r\n\r\n'), 15)
-                lines = head.decode('latin-1').split('\r\n')
-                method, raw_url, version = lines[0].split(' ')
-                if version not in {'HTTP/1.0', 'HTTP/1.1'}:
-                    raise CrawlError('Invalid proxy request', 400)
-                connect = method == 'CONNECT'
-                target_url = 'https://' + raw_url if connect else raw_url
+                head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 15)
+                lines = head.decode("latin-1").split("\r\n")
+                method, raw_url, version = lines[0].split(" ")
+                if version not in {"HTTP/1.0", "HTTP/1.1"}:
+                    raise CrawlError("Invalid proxy request", 400)
+                connect = method == "CONNECT"
+                target_url = "https://" + raw_url if connect else raw_url
                 target = await asyncio.to_thread(resolve_target, target_url, self.protection)
-                remote_reader, remote = (await dial_upstream(target, self.upstream, self.protection)
-                                         if self.upstream else await dial_target(target))
+                remote_reader, remote = (
+                    await dial_upstream(target, self.upstream, self.protection)
+                    if self.upstream
+                    else await dial_target(target)
+                )
                 if connect:
-                    writer.write(b'HTTP/1.1 200 Connection established\r\n\r\n')
+                    writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
                     await writer.drain()
                 else:
                     parsed = urlsplit(raw_url)
-                    if parsed.scheme != 'http':
-                        raise CrawlError('HTTPS requires CONNECT', 400)
-                    path = parsed.path or '/'
+                    if parsed.scheme != "http":
+                        raise CrawlError("HTTPS requires CONNECT", 400)
+                    path = parsed.path or "/"
                     if parsed.query:
-                        path += '?' + parsed.query
+                        path += "?" + parsed.query
                     # Pin both the connection and HTTP Host, ignoring any client mismatch.
-                    headers = [line for line in lines[1:] if line and line.split(':', 1)[0].lower()
-                               not in {'host', 'proxy-authorization', 'proxy-connection', 'connection'}]
-                    headers += [f'Host: {authority(target.host, target.port)}', 'Connection: close']
-                    remote.write((f'{method} {path} HTTP/1.1\r\n' + '\r\n'.join(headers) + '\r\n\r\n').encode('latin-1'))
+                    headers = [
+                        line
+                        for line in lines[1:]
+                        if line
+                        and line.split(":", 1)[0].lower()
+                        not in {"host", "proxy-authorization", "proxy-connection", "connection"}
+                    ]
+                    headers += [f"Host: {authority(target.host, target.port)}", "Connection: close"]
+                    remote.write(
+                        (f"{method} {path} HTTP/1.1\r\n" + "\r\n".join(headers) + "\r\n\r\n").encode("latin-1")
+                    )
                     await remote.drain()
                 established = True
                 await _relay(reader, writer, remote_reader, remote)
@@ -145,13 +162,15 @@ class EgressProxy:
             if not established:
                 status = 403 if exc.status_code == 400 else 502
                 self.blocked += status == 403
-                writer.write(f'HTTP/1.1 {status} Egress rejected\r\nContent-Length: 0\r\nConnection: close\r\nX-Extraction-Policy: blocked\r\n\r\n'.encode())
+                writer.write(
+                    f"HTTP/1.1 {status} Egress rejected\r\nContent-Length: 0\r\nConnection: close\r\nX-Extraction-Policy: blocked\r\n\r\n".encode()
+                )
                 with suppress(OSError):
                     await writer.drain()
         except (OSError, ValueError, TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError):
             # A malformed/disconnected/overdue connection is closed, never retried without the guard.
             if not established:
-                writer.write(b'HTTP/1.1 502 Egress connection failed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
+                writer.write(b"HTTP/1.1 502 Egress connection failed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
         finally:
             if remote:
                 remote.close()
