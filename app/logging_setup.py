@@ -5,6 +5,7 @@ context manager).  All stdlib ``logging`` records emitted by third-party
 libraries (Selenium, httpx, trafilatura, …) are forwarded to loguru so that
 the entire application produces a single, consistently formatted log stream.
 """
+
 from __future__ import annotations
 
 import logging
@@ -34,9 +35,7 @@ class _InterceptHandler(logging.Handler):
             frame = frame.f_back  # type: ignore[assignment]
             depth += 1
 
-        logger.opt(depth=depth, exception=record.exc_info).log(
-            level, record.getMessage()
-        )
+        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
 
 
 def setup_logging(level: str = "INFO", json_logs: bool = False) -> None:

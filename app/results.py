@@ -1,15 +1,16 @@
 """Internal results: failed conversions never masquerade as extracted text."""
+
 from dataclasses import dataclass, field
 from typing import Literal
 
-ExtractionStatus = Literal['ok', 'empty', 'unsupported', 'skipped', 'failed', 'blocked']
+ExtractionStatus = Literal["ok", "empty", "unsupported", "skipped", "failed", "blocked"]
 
 
 @dataclass
 class ConversionResult:
-    markdown: str = ''
+    markdown: str = ""
     converter: str | None = None
-    status: ExtractionStatus = 'empty'
+    status: ExtractionStatus = "empty"
     warnings: list[str] = field(default_factory=list)
 
 
@@ -19,7 +20,7 @@ class FetchResult:
     final_url: str
     status_code: int | None
     content_type: str | None
-    engine: Literal['http', 'selenium'] = 'http'
+    engine: Literal["http", "selenium"] = "http"
     truncated: bool = False
     screenshot_base64: str | None = None
     warnings: list[str] = field(default_factory=list)

@@ -1,123 +1,29 @@
 from __future__ import annotations
 
-import ipaddress
 import random
 import re
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-_PRIVATE_NETS = [
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("169.254.0.0/16"),   # link-local / AWS metadata
-    ipaddress.ip_network("0.0.0.0/8"),
-    ipaddress.ip_network("::1/128"),
-    ipaddress.ip_network("fc00::/7"),
-    ipaddress.ip_network("fe80::/10"),
-]
-_LOOPBACK_NAMES = {"localhost", "ip6-localhost", "ip6-loopback", "loopback"}
-
 
 def is_ssrf_url(url: str) -> bool:
-    """Return True if *url* targets a private/internal address (SSRF risk).
+    """Compatibility helper; actual connections additionally use the egress guard."""
+    from .results import CrawlError
+    from .security import resolve_target
 
-    Blocks loopback hostnames and any host that resolves to a private IP
-    literal.  Hostnames that require DNS resolution are allowed through
-    (DNS-rebinding protection requires an additional resolver check which
-    is outside the scope of this function).
-    """
     try:
-        host = (urlparse(url).hostname or "").lower().rstrip(".")
-    except Exception:
+        resolve_target(url)
         return False
-    if not host:
-        return False
-    if host in _LOOPBACK_NAMES:
+    except CrawlError:
         return True
-    try:
-        addr = ipaddress.ip_address(host)
-        return any(addr in net for net in _PRIVATE_NETS)
-    except ValueError:
-        pass  # hostname – not an IP literal, allow through
-    return False
 
 
-# Precise multi-word phrases that reliably signal error/bot-wall pages.
-# Single-word terms like "error", "fehler", "404", "not found" were removed
-# because they produce massive false-positives on legitimate content pages
-# (e.g. a tutorial *about* 404 errors, or any page containing the word "error").
-_ERROR_PATTERNS = re.compile(
-    r"("
-    # English – HTTP error pages
-    r"page not found"
-    r"|this page (could not be found|does not exist|is no longer available)"
-    r"|404 (–|-|error|page)"
-    r"|(403|401|500|502|503|504)\s+(forbidden|error|bad gateway|service unavailable|gateway timeout)"
-    r"|access denied"
-    r"|temporarily unavailable"
-    r"|we('re| are) currently under maintenance"
-    r"|bad gateway"
-    r"|gateway timeout"
-    r"|service unavailable"
-    # Bot / captcha walls
-    r"|just a moment\.\.\."
-    r"|checking your browser"
-    r"|verifying you are human"
-    r"|attention required"
-    r"|enable javascript to continue"
-    r"|please (enable|turn on) javascript"
-    # German – HTTP error pages
-    r"|seite (wurde )?nicht gefunden"
-    r"|diese seite (existiert nicht|ist nicht mehr verfügbar)"
-    r"|404[ -](fehler|seite)"
-    r"|(403|401|500|502|503|504)\s+(verboten|fehler|nicht erreichbar)"
-    r"|zugriff verweigert"
-    r"|vorübergehend nicht verfügbar"
-    r"|wir (arbeiten derzeit|sind gerade) an (der|einem) wartung"
-    r"|javascript (wird benötigt|ist deaktiviert|ist erforderlich)"
-    r"|bitte (aktivieren|einschalten) sie javascript"
-    r")",
-    re.IGNORECASE,
-)
+def detect_error_page(text: str, status_code: int | None, *, check_thin: bool = False) -> bool:
+    """Short valid pages are useful; empty results and explicit blocks are failures."""
+    from .preflight import blocked_content
 
-
-def detect_error_page(
-    text: str,
-    status_code: int | None,
-    *,
-    check_thin: bool = False,
-) -> bool:
-    """Return True when *text* looks like an error or empty page.
-
-    Args:
-        text:         HTML or Markdown to inspect.
-        status_code:  HTTP status of the response (>= 400 → always True).
-        check_thin:   When True, also flag pages whose converted Markdown has
-                      fewer than 50 words, or fewer than 150 words AND no
-                      discernible structure (headings / lists / paragraphs).
-                      Pass check_thin=True only for the final Markdown, not
-                      for raw HTML (which is naturally verbose).
-    """
-    if status_code and status_code >= 400:
-        return True
-    if _ERROR_PATTERNS.search(text):
-        return True
-    if check_thin and text:
-        words = len(text.split())
-        if words < 50:
-            return True
-        if words < 150:
-            has_structure = bool(
-                re.search(r"^#{1,6} ", text, re.MULTILINE)
-                or re.search(r"^\s*[-*] ", text, re.MULTILINE)
-                or text.count("\n\n") >= 2
-            )
-            if not has_structure:
-                return True
-    return False
+    return blocked_content(text, status_code) or (check_thin and not text.strip())
 
 
 def extract_links_from_html(html: str, base_url: str) -> list[str]:
@@ -141,18 +47,54 @@ def extract_links_from_html(html: str, base_url: str) -> list[str]:
 
 # Heuristics for link classification
 SOCIAL_DOMAINS = {
-    "twitter.com", "x.com", "facebook.com", "instagram.com", "linkedin.com",
-    "youtube.com", "t.me", "telegram.org", "tiktok.com", "mastodon.social",
-    "github.com", "medium.com", "reddit.com", "xing.com", "pinterest.com",
-    "snapchat.com", "discord.com", "twitch.tv", "vimeo.com",
+    "twitter.com",
+    "x.com",
+    "facebook.com",
+    "instagram.com",
+    "linkedin.com",
+    "youtube.com",
+    "t.me",
+    "telegram.org",
+    "tiktok.com",
+    "mastodon.social",
+    "github.com",
+    "medium.com",
+    "reddit.com",
+    "xing.com",
+    "pinterest.com",
+    "snapchat.com",
+    "discord.com",
+    "twitch.tv",
+    "vimeo.com",
 }
 
 DOWNLOAD_EXTS = {
-    ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx",
-    ".zip", ".rar", ".7z", ".tar", ".gz",
-    ".csv", ".txt", ".rtf", ".odt", ".ods", ".odp",
-    ".mp3", ".mp4", ".avi", ".mov", ".mkv", ".wav",
-    ".epub", ".mobi",
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".ppt",
+    ".pptx",
+    ".xls",
+    ".xlsx",
+    ".zip",
+    ".rar",
+    ".7z",
+    ".tar",
+    ".gz",
+    ".csv",
+    ".txt",
+    ".rtf",
+    ".odt",
+    ".ods",
+    ".odp",
+    ".mp3",
+    ".mp4",
+    ".avi",
+    ".mov",
+    ".mkv",
+    ".wav",
+    ".epub",
+    ".mobi",
 }
 
 # Non-navigable schemes whose links should be omitted from output
@@ -183,12 +125,33 @@ _RE_CONTACT = re.compile(
     r"write[\-_]to[\-_]us|reach[\-_]us)($|/|\?|#)",
     re.IGNORECASE,
 )
-_NAV_TEXTS = frozenset({
-    "home", "start", "startseite", "nach oben", "back to top", "top",
-    "menu", "menü", "navigation", "zurück", "back",
-    "übersicht", "overview", "sitemap",
-    "→", "←", "›", "‹", "»", "«", "▲", "▸", "◂",
-})
+_NAV_TEXTS = frozenset(
+    {
+        "home",
+        "start",
+        "startseite",
+        "nach oben",
+        "back to top",
+        "top",
+        "menu",
+        "menü",
+        "navigation",
+        "zurück",
+        "back",
+        "übersicht",
+        "overview",
+        "sitemap",
+        "→",
+        "←",
+        "›",
+        "‹",
+        "»",
+        "«",
+        "▲",
+        "▸",
+        "◂",
+    }
+)
 
 
 def _is_internal(link: str, base_url: str) -> bool:
@@ -291,12 +254,14 @@ def extract_links_detailed_from_html(html: str, base_url: str) -> list[dict]:
 
         category = _classify_link(absolute, raw_href, text)
         internal = _is_internal(absolute, base_url)
-        items.append({
-            "url": absolute,
-            "text": text,
-            "internal": internal,
-            "category": category,
-        })
+        items.append(
+            {
+                "url": absolute,
+                "text": text,
+                "internal": internal,
+                "category": category,
+            }
+        )
     return items
 
 

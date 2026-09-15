@@ -1,4 +1,5 @@
 """One option contract for single and batch requests."""
+
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -9,46 +10,59 @@ from .results import ExtractionStatus
 
 
 class CrawlOptions(BaseModel):
-    model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
-    mode: Literal['fast', 'js', 'auto'] | None = None
-    js_strategy: Literal['accuracy', 'speed'] | None = None
-    timeout_ms: int | None = Field(None, ge=1000, le=600_000, description='End-to-end deadline including queue time')
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    mode: Literal["fast", "js", "auto"] | None = None
+    js_strategy: Literal["accuracy", "speed"] | None = None
+    timeout_ms: int | None = Field(None, ge=1000, le=600_000, description="End-to-end deadline including queue time")
     retries: int | None = Field(None, ge=0, le=10)
-    max_bytes: int | None = Field(None, ge=1024, le=100 * 1024 * 1024, description='Decoded HTTP body or rendered HTML limit; truncation is reported')
-    proxy: str | None = Field(None, description='HTTP(S) proxy; numeric CONNECT destinations must be supported')
+    max_bytes: int | None = Field(
+        None,
+        ge=1024,
+        le=100 * 1024 * 1024,
+        description="Decoded HTTP body or rendered HTML limit; truncation is reported",
+    )
+    proxy: str | None = Field(None, description="HTTP(S) proxy; numeric CONNECT destinations must be supported")
     allow_insecure_ssl: bool | None = None
     user_agent: str | None = Field(None, min_length=1, max_length=512)
     headless: bool | None = None
     js_auto_wait: bool | None = None
-    wait_for_selectors: list[str] = Field(default_factory=list, max_length=10, description='All selectors must become visible')
-    wait_for_ms: int = Field(0, ge=0, le=30_000, description='Optional minimum wait, within the request deadline')
-    html_converter: Literal['trafilatura', 'markitdown', 'bs4'] | None = None
+    wait_for_selectors: list[str] = Field(
+        default_factory=list, max_length=10, description="All selectors must become visible"
+    )
+    wait_for_ms: int = Field(0, ge=0, le=30_000, description="Optional minimum wait, within the request deadline")
+    html_converter: Literal["trafilatura", "markitdown", "bs4"] | None = None
     trafilatura_clean_markdown: bool | None = None
-    media_conversion_policy: Literal['skip', 'metadata', 'full', 'none'] | None = None
+    media_conversion_policy: Literal["skip", "metadata", "full", "none"] | None = None
     extract_links: bool = False
     screenshot: bool = False
     anonymize: bool = False
-    anonymize_language: Literal['de', 'en'] = 'de'
+    anonymize_language: Literal["de", "en"] = "de"
     crawl_rate_limit_rps: float | None = Field(None, ge=0, le=100)
     force_refresh: bool = False
 
-    @field_validator('proxy')
+    @field_validator("proxy")
     @classmethod
     def valid_proxy(cls, value):
-        if not value or value == 'string':
+        if not value or value == "string":
             return None
         parsed = urlsplit(value)
-        if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.path not in {'', '/'} or parsed.query or parsed.fragment:
-            raise ValueError('Only HTTP(S) proxy URLs are supported')
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("Only HTTP(S) proxy URLs are supported")
         if parsed.port is not None and not 1 <= parsed.port <= 65535:
-            raise ValueError('Invalid proxy port')
+            raise ValueError("Invalid proxy port")
         return value
 
-    @field_validator('user_agent')
+    @field_validator("user_agent")
     @classmethod
     def valid_user_agent(cls, value):
         if value and any(ord(c) < 32 or ord(c) > 126 for c in value):
-            raise ValueError('User agent must contain printable ASCII')
+            raise ValueError("User agent must contain printable ASCII")
         return value
 
 
@@ -64,13 +78,19 @@ class BatchCrawlRequest(CrawlOptions):
 def resolve_options(request: CrawlOptions, config: Settings = settings) -> CrawlOptions:
     values = {name: getattr(request, name) for name in CrawlOptions.model_fields}
     defaults = {
-        'mode': config.default_mode, 'js_strategy': config.default_js_strategy,
-        'timeout_ms': config.default_timeout_seconds * 1000, 'retries': config.default_retries,
-        'max_bytes': config.default_max_bytes, 'headless': config.default_headless,
-        'user_agent': config.default_user_agent, 'js_auto_wait': config.default_js_auto_wait,
-        'html_converter': config.html_converter, 'trafilatura_clean_markdown': config.trafilatura_clean_markdown,
-        'media_conversion_policy': config.media_conversion_policy, 'allow_insecure_ssl': config.allow_insecure_ssl,
-        'crawl_rate_limit_rps': config.default_domain_rate_limit_rps,
+        "mode": config.default_mode,
+        "js_strategy": config.default_js_strategy,
+        "timeout_ms": config.default_timeout_seconds * 1000,
+        "retries": config.default_retries,
+        "max_bytes": config.default_max_bytes,
+        "headless": config.default_headless,
+        "user_agent": config.default_user_agent,
+        "js_auto_wait": config.default_js_auto_wait,
+        "html_converter": config.html_converter,
+        "trafilatura_clean_markdown": config.trafilatura_clean_markdown,
+        "media_conversion_policy": config.media_conversion_policy,
+        "allow_insecure_ssl": config.allow_insecure_ssl,
+        "crawl_rate_limit_rps": config.default_domain_rate_limit_rps,
     }
     values.update({name: value for name, value in defaults.items() if values[name] is None})
     return CrawlOptions(**values)
@@ -80,7 +100,9 @@ class LinkInfo(BaseModel):
     url: str
     text: str | None = None
     internal: bool
-    category: Literal['content', 'social', 'nav', 'auth', 'legal', 'search', 'contact', 'download', 'anchor', 'other'] = 'other'
+    category: Literal[
+        "content", "social", "nav", "auth", "legal", "search", "contact", "download", "anchor", "other"
+    ] = "other"
 
 
 class AnonymizationResult(BaseModel):
@@ -90,14 +112,14 @@ class AnonymizationResult(BaseModel):
 
 
 class CrawlResponse(BaseModel):
-    request_mode: Literal['fast', 'js', 'auto']
-    fetch_engine: Literal['http', 'selenium']
+    request_mode: Literal["fast", "js", "auto"]
+    fetch_engine: Literal["http", "selenium"]
     converter: str | None = None
     extraction_status: ExtractionStatus
     success: bool
     requested_url: str
     final_url: str
-    status_code: int | None = Field(description='Upstream status; null when the browser cannot observe it')
+    status_code: int | None = Field(description="Upstream status; null when the browser cannot observe it")
     redirected: bool
     content_type: str | None
     markdown: str
