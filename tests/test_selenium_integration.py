@@ -3,6 +3,7 @@
 import asyncio
 import os
 import time
+import traceback
 from urllib.parse import urlsplit
 
 import pytest
@@ -19,6 +20,15 @@ pytestmark = [
     pytest.mark.selenium,
     pytest.mark.skipif(os.getenv("RUN_SELENIUM_TESTS") != "1", reason="Opt-in real Chrome integration"),
 ]
+
+
+def fixture_fetch(*args):
+    """Expose chained browser errors for fixture diagnostics, never API responses."""
+    try:
+        return selenium_fetch(*args)
+    except CrawlError:
+        traceback.print_exc()
+        raise
 
 
 @pytest.fixture
@@ -75,7 +85,7 @@ async def browser(monkeypatch):
                 url = f"http://fixture.example:{port}{path}"
                 options = resolve_options(CrawlRequest(url=url, mode="js", **kwargs))
                 deadline = Deadline(seconds)
-                return await pool.run(selenium_fetch, (url, options, guard.url, deadline.expires_at), deadline)
+                return await pool.run(fixture_fetch, (url, options, guard.url, deadline.expires_at), deadline)
 
             yield fetch, requests, pool
     finally:

@@ -36,6 +36,10 @@ jobs:
           install-chromedriver: true
           install-dependencies: true
       - run: python -m pip install -e '.[dev,documents]'
+      - name: Verify Chrome can start with sandboxing enabled
+        run: timeout 15 "$CHROME_BINARY" --headless --disable-background-networking --dump-dom about:blank
+        env:
+          CHROME_BINARY: ${{ steps.chrome.outputs.chrome-path }}
       - run: pytest -q tests/test_selenium_integration.py
         env:
           RUN_SELENIUM_TESTS: '1'
