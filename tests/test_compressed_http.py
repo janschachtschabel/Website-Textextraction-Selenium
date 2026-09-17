@@ -59,3 +59,26 @@ async def test_concatenated_gzip_members_respect_total_output_limit():
         response = httpx.Response(200, stream=GzipStream(compressed), headers={"content-encoding": "gzip"})
         body, truncated = await read_body(response, limit)
         assert body == expected and truncated is shortened
+
+
+async def test_raw_deflate_bodies_are_decoded_like_zlib_wrapped_ones():
+    import zlib
+
+    from app.body_reader import read_body
+
+    payload = b"<html><body>Raw deflate</body></html>"
+    raw = zlib.compressobj(wbits=-15)
+    compressed = raw.compress(payload) + raw.flush()
+    response = httpx.Response(200, stream=GzipStream(compressed), headers={"content-encoding": "deflate"})
+    assert await read_body(response, 4096) == (payload, False)
+
+
+async def test_corrupt_deflate_bodies_are_still_rejected():
+    import pytest
+
+    from app.body_reader import read_body
+    from app.results import CrawlError
+
+    response = httpx.Response(200, stream=GzipStream(b"not compressed at all"), headers={"content-encoding": "deflate"})
+    with pytest.raises(CrawlError, match="compressed"):
+        await read_body(response, 4096)

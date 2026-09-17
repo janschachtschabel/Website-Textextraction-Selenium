@@ -1,6 +1,7 @@
 """Selenium fetch adapter. One return type, no bot-wall bypass or fake status 200."""
 
 import asyncio
+import re
 
 from selenium.common.exceptions import WebDriverException
 
@@ -18,6 +19,14 @@ if (window.MathJax && MathJax.startup && MathJax.startup.document) {
   }
 }
 """
+
+
+# A rejected certificate or a policy block answers the same way on every attempt.
+_PERMANENT = re.compile(r"net::ERR_(CERT_[A-Z0-9_]+|BLOCKED_BY_CLIENT)")
+
+
+def permanent_failure(message: str) -> bool:
+    return bool(_PERMANENT.search(message))
 
 
 def navigation_failed(code):
@@ -143,7 +152,7 @@ class BrowserFetcher:
                         result.warnings.append(f"Network policy blocked {guard.blocked} browser connection(s)")
                     return result
                 except CrawlError as exc:
-                    if exc.status_code != 502 or attempt == options.retries:
+                    if exc.status_code != 502 or attempt == options.retries or permanent_failure(str(exc)):
                         raise
                     await deadline.run(asyncio.sleep(min(2**attempt, 8)))
         raise AssertionError("Unreachable browser retry state")

@@ -317,3 +317,44 @@ def test_download_is_reported_without_waiting_for_a_page(monkeypatch):
     )
     assert any("download" in warning for warning in result.warnings)
     assert result.final_url == "https://example.com/a.pdf"
+
+
+class CountingPool:
+    def __init__(self, error):
+        self.error, self.attempts = error, 0
+
+    async def run(self, function, args, deadline):
+        self.attempts += 1
+        raise self.error
+
+
+async def browser_attempts(error, retries=2):
+    from app.deadline import Deadline
+    from app.js_fetcher import BrowserFetcher
+
+    class NoRateLimit:
+        async def acquire(self, *args):
+            return None
+
+    pool = CountingPool(error)
+    fetcher = BrowserFetcher(pool, NoRateLimit(), settings)
+    options = resolve_options(CrawlRequest(url="https://example.com", retries=retries))
+    with pytest.raises(type(error)):
+        await fetcher.fetch("https://example.com", options, Deadline(10))
+    return pool.attempts
+
+
+@pytest.mark.parametrize(
+    "code", ["net::ERR_CERT_AUTHORITY_INVALID", "net::ERR_CERT_DATE_INVALID", "net::ERR_BLOCKED_BY_CLIENT"]
+)
+async def test_deterministic_browser_failures_are_not_retried(code):
+    from app.js_fetcher import navigation_failed
+
+    assert await browser_attempts(navigation_failed(code)) == 1
+
+
+@pytest.mark.parametrize("code", ["net::ERR_CONNECTION_RESET", "net::ERR_TUNNEL_CONNECTION_FAILED", None])
+async def test_transient_browser_failures_still_use_every_attempt(code):
+    from app.js_fetcher import navigation_failed
+
+    assert await browser_attempts(navigation_failed(code)) == 3
