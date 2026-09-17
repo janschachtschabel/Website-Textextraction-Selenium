@@ -33,7 +33,8 @@ def markitdown_stream(data: bytes, content_type: str | None, extension: str, url
 def page_heading(soup: BeautifulSoup) -> str:
     """Text of the first visible <h1>; empty for screen-reader helpers and unclosed, overlong headings."""
     for h1 in soup.find_all("h1"):
-        if h1.has_attr("hidden") or h1.get("aria-hidden") == "true" or _HIDDEN_CLASSES & set(h1.get("class", [])):
+        hidden = h1.has_attr("hidden") or str(h1.get("aria-hidden", "")).lower() == "true"
+        if hidden or _HIDDEN_CLASSES & set(h1.get("class", [])):
             continue
         heading = copy(h1)
         for br in heading.find_all("br"):

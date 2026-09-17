@@ -54,6 +54,7 @@ def test_trafilatura_page_heading_it_kept_is_not_repeated(heading):
     [
         '<header><h1 class="sr-only">Hauptnavigation</h1></header><main><h2>Optics</h2>{}</main>',
         "<header><h1 hidden>Hauptnavigation</h1></header><main><h2>Optics</h2>{}</main>",
+        '<header><h1 aria-hidden="TRUE">Hauptnavigation</h1></header><main><h2>Optics</h2>{}</main>',
         "<header><h1>Hauptnavigation</h1></header><article><h1>Optics</h1>{}</article>",
         "<h1>" + "Hauptnavigation " * 20 + "</h1><div>{}</div>",  # an unclosed heading swallowed the page
     ],
