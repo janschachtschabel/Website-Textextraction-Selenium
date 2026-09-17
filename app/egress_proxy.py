@@ -13,6 +13,8 @@ from urllib.parse import unquote, urlsplit
 from .results import CrawlError
 from .security import Target, resolve_target
 
+_SHUTDOWN_WAIT_SECONDS = 2
+
 
 def authority(host: str, port: int) -> str:
     return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
@@ -113,7 +115,11 @@ class EgressProxy:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        await self.server.wait_closed()
+        # All handlers are finished. wait_closed() also waits for each transport to detach,
+        # which CPython's Windows proactor can skip after a connection reset (killed browser):
+        # an unbounded wait would hang the request past its deadline and leak its capacity slot.
+        with suppress(TimeoutError):
+            await asyncio.wait_for(self.server.wait_closed(), _SHUTDOWN_WAIT_SECONDS)
 
     async def _handle(self, reader, writer):
         remote = None

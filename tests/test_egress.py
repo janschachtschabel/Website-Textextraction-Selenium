@@ -85,6 +85,20 @@ async def test_upstream_proxy_receives_pinned_destination_and_its_own_auth():
         await server.wait_closed()
 
 
+async def test_proxy_shutdown_does_not_hang_on_a_connection_that_never_detaches():
+    # On Windows, CPython's proactor can skip Server._detach() after a reset connection
+    # (a killed browser), so Server.wait_closed() would never return.
+    guard = await EgressProxy().__aenter__()
+    never = asyncio.get_running_loop().create_future()
+
+    async def stuck_wait_closed():
+        await never
+
+    guard.server.wait_closed = stuck_wait_closed
+    await asyncio.wait_for(guard.__aexit__(), timeout=10)
+    assert not guard.server.is_serving()
+
+
 async def test_proxy_shutdown_cancels_open_tunnels_before_waiting_for_server():
     remote_tasks = set()
 
