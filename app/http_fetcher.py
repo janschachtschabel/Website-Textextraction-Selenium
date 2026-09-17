@@ -64,6 +64,9 @@ class HTTPFetcher:
                 result, after = await self._redirects(url, options, deadline)
                 if result.status_code not in RETRY_STATUSES or attempt == options.retries:
                     return result
+            except httpx.TimeoutException as exc:
+                # Each HTTPX timeout is the remaining deadline; a coarse clock can let it fire first.
+                raise CrawlError("Crawl deadline exceeded", 504) from exc
             except httpx.HTTPError as exc:
                 if attempt == options.retries:
                     raise CrawlError("HTTP download failed") from exc

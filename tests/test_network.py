@@ -47,6 +47,19 @@ async def test_http_reads_full_document_and_reports_request_limit():
     await fetcher.close()
 
 
+@pytest.mark.parametrize("retries", [0, 1])
+async def test_http_timeout_is_reported_as_the_expired_deadline(retries):
+    # Every HTTPX timeout is the remaining deadline; with a coarse clock it can fire before the deadline.
+    def transport(request):
+        raise httpx.ReadTimeout("read timed out", request=request)
+
+    fetcher = HTTPFetcher(transport=httpx.MockTransport(transport), validate=lambda url: None)
+    with pytest.raises(CrawlError) as error:
+        await fetcher.fetch("https://example.com", options(retries=retries), Deadline(5))
+    assert (str(error.value), error.value.status_code) == ("Crawl deadline exceeded", 504)
+    await fetcher.close()
+
+
 async def test_redirect_is_checked_before_second_request():
     calls = []
 
