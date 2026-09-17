@@ -7,8 +7,10 @@ from bs4 import BeautifulSoup
 from .markup import decode_text
 from .results import ConversionResult, FetchResult
 
+# The phrase opens the text or the line after one other line, such as the site name or a page heading.
 _CHALLENGE = re.compile(
-    r"^\s*(?:#{1,6}\s*)?(just a moment|checking your browser|verifying you are human|attention required)", re.I
+    r"\A\s*(?:.*$\s*)?(?:#{1,6}\s*)?(just a moment|checking your browser|verifying you are human|attention required)",
+    re.I | re.M,
 )
 
 

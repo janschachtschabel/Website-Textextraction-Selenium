@@ -8,7 +8,7 @@ import pytest
 from app.config import settings
 from app.deadline import Deadline
 from app.http_fetcher import HTTPFetcher
-from app.preflight import needs_browser
+from app.preflight import blocked_content, needs_browser
 from app.rate_limiter import RateLimiter
 from app.results import ConversionResult, CrawlError, FetchResult
 from app.schemas import CrawlRequest, resolve_options
@@ -106,6 +106,20 @@ def test_blocked_status_short_success_and_feed_link_do_not_start_browser():
     ]:
         fetched = FetchResult(html.encode(), "https://example.com", status, "text/html")
         assert not needs_browser(fetched, article)
+
+
+@pytest.mark.parametrize(
+    "text, blocked",
+    [
+        ("Just a moment...", True),
+        ("# Example Shop\n\nChecking your browser before accessing example.com.", True),
+        ("www.example.com\nVerifying you are human. This may take a few seconds.", True),
+        ("# Physics\n\nLight changes its direction at a mirror.", False),
+        ("# Physics\n\nIntroduction\n\nJust a moment of reflection explains the rays.", False),
+    ],
+)
+def test_challenge_text_is_detected_after_a_heading_or_site_name(text, blocked):
+    assert blocked_content(text, 200) is blocked
 
 
 def test_empty_spa_shell_needs_browser_but_cookie_words_do_not(article_html):
