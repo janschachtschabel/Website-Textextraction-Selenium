@@ -96,3 +96,9 @@ async def test_streamed_body_is_capped_without_a_content_length():
     )
     assert [message["type"] for message in messages] == ["http.response.start", "http.response.body"]
     assert messages[0]["status"] == 413
+
+
+@pytest.mark.parametrize("key, advertised", [(None, "/docs"), ("token", None)])
+async def test_root_advertises_the_docs_only_while_they_exist(key, advertised):
+    response = await _request(create_app(replace(LOCAL, api_key=key)), "GET", "/")
+    assert response.json()["docs"] == advertised

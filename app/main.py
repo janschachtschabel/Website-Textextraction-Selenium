@@ -54,7 +54,7 @@ def create_app(config=settings, resources=None):
 
     @application.get("/")
     async def root():
-        return {"service": "Website Text Extraction", "version": __version__, "docs": "/docs"}
+        return {"service": "Website Text Extraction", "version": __version__, "docs": application.docs_url}
 
     @application.get("/health")
     async def health():
