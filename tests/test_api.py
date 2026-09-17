@@ -93,7 +93,9 @@ async def test_failed_extraction_is_not_cached_and_health_needs_no_idle_browser(
     assert resources.browser_pool.stats()["started"] == 0
 
 
-async def test_anonymization_failure_returns_no_text_or_parallel_representation(api):
+async def test_anonymization_failure_returns_no_text_or_parallel_representation(api, monkeypatch):
+    # Fail even where the PII extra is installed; spawned conversion workers inherit the environment.
+    monkeypatch.setenv("PRESIDIO_DE_MODEL", "model_not_installed_for_test")
     client, state, _ = api
     response = await client.post(
         "/crawl",
