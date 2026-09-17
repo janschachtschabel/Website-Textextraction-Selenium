@@ -24,6 +24,7 @@ class FetchResult:
     truncated: bool = False
     screenshot_base64: str | None = None
     warnings: list[str] = field(default_factory=list)
+    settled: bool = True  # False: browser auto-wait gave up, the content may be incomplete
 
 
 class CrawlError(Exception):

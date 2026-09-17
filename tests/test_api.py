@@ -148,6 +148,28 @@ async def test_auto_uses_rendered_result_and_its_success_status(api):
     assert result["fetch_engine"] == "selenium" and "Rendered lesson content" in result["markdown"]
 
 
+async def test_unsettled_rendered_page_is_returned_but_not_a_cached_success(api):
+    from app.results import FetchResult
+
+    client, _, resources = api
+    calls = []
+
+    class Browser:
+        async def fetch(self, url, options, deadline):
+            calls.append(url)
+            # Like a spinner that never stopped: the content may be incomplete, as with truncation.
+            return FetchResult(
+                b"<main>Rendered lesson content.</main>", url, 200, "text/html", "selenium", settled=False
+            )
+
+    resources.browser = Browser()
+    for _ in range(2):
+        result = (await client.post("/crawl", json={"url": "https://example.com/spinner", "mode": "js"})).json()
+        assert not result["success"] and not result["cached"]
+        assert "Rendered lesson content" in result["markdown"]
+    assert len(calls) == 2
+
+
 def pii_backend(text, language):
     from app.schemas import AnonymizationResult
 

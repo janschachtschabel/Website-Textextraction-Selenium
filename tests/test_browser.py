@@ -1,5 +1,9 @@
 import json
+import time
 
+import pytest
+
+from app import browser_readiness
 from app.browser_readiness import navigation_status
 from app.config import settings
 from app.schemas import CrawlRequest, resolve_options
@@ -46,6 +50,58 @@ def test_main_document_status_is_not_overwritten_by_iframe_or_assets():
     entries = [event(404, "main", "Document"), event(200, "iframe", "Document"), event(200, "main", "Image")]
     assert navigation_status(entries, "main") == (404, "text/html")
     assert navigation_status([], "main") == (None, None)
+
+
+@pytest.mark.parametrize(
+    "snapshot",
+    [
+        {"text": "Visible content", "busy": True, "ready": True, "math": True},  # spinner that never stops
+        {"text": "", "busy": False, "ready": True, "math": True},  # nothing rendered, e.g. a download
+    ],
+)
+def test_auto_wait_gives_up_on_pages_that_never_settle(monkeypatch, snapshot):
+    from app.deadline import Deadline
+
+    class Driver:
+        def execute_script(self, script, *args):
+            return snapshot
+
+        def find_elements(self, *args):
+            return []
+
+    monkeypatch.setattr(browser_readiness, "AUTO_WAIT_LIMIT_SECONDS", {"speed": 0.3, "accuracy": 0.3})
+    options = resolve_options(CrawlRequest(url="https://example.com", js_strategy="speed", js_auto_wait=True))
+    started = time.monotonic()
+    assert browser_readiness.wait_for_content(Driver(), options, Deadline(3)) is False
+    assert time.monotonic() - started < 2
+
+
+@pytest.mark.parametrize("explicit", [{"wait_for_selectors": ["#results"]}, {"wait_for_ms": 600}])
+def test_auto_wait_limit_starts_after_explicit_waits(monkeypatch, explicit):
+    from app.deadline import Deadline
+
+    started = time.monotonic()
+
+    class Element:
+        def is_displayed(self):
+            return True
+
+    class Driver:
+        def execute_script(self, script, *args):
+            # The page keeps changing until 0.6 s, later than the auto-wait limit, then stays.
+            elapsed = time.monotonic() - started
+            self.late = elapsed >= 0.6
+            text = "Loaded results" if self.late else f"Loading {int(elapsed * 20)}"
+            return {"text": text, "busy": False, "ready": True, "math": True}
+
+        def find_elements(self, *args):
+            return [Element()] if self.late else []
+
+    monkeypatch.setattr(browser_readiness, "AUTO_WAIT_LIMIT_SECONDS", {"speed": 0.3, "accuracy": 0.3})
+    options = resolve_options(
+        CrawlRequest(url="https://example.com", js_strategy="speed", js_auto_wait=True, **explicit)
+    )
+    assert browser_readiness.wait_for_content(Driver(), options, Deadline(5)) is True
 
 
 def test_rendered_html_is_bounded_before_webdriver_transfers_it(monkeypatch):

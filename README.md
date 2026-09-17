@@ -72,7 +72,7 @@ Important result fields:
 | `converter` | Actual converter, including a fallback |
 | `status_code` | Upstream HTTP status; `null` if Chrome could not observe it |
 | `extraction_status` | `ok`, `empty`, `unsupported`, `skipped`, `failed`, or `blocked` |
-| `success` | Usable, non-truncated text from a successful upstream response |
+| `success` | Usable, complete (non-truncated, settled) text from a successful upstream response |
 | `truncated` / `warnings` | Explicit size limits, fallbacks and other limitations |
 | `cached` / `coalesced` | Shared result-cache hit / shared in-progress extraction |
 | `elapsed_ms` | Duration of this call, including waiting |
@@ -120,6 +120,12 @@ remain overrides. `.env.example` lists all supported settings.
 - `wait_for_selectors`: wait until all CSS selectors match visible elements.
   Content stability, busy indicators and MathJax readiness replace fixed sleeps.
   `wait_for_ms` is an optional minimum wait within the same deadline.
+- `js_auto_wait=true` waits for that readiness for at most 10 s (`speed`) or
+  20 s (`accuracy`) once the selectors and `wait_for_ms` are satisfied; those two
+  still apply until the deadline. Pages that never settle (a permanent spinner,
+  a denied download) are then returned in their current state with a warning
+  and `success=false`. Leave room for page load plus this limit in `timeout_ms`;
+  an expired deadline still ends the request with 504.
 - `user_agent`, `headless`, `allow_insecure_ssl` and `proxy` apply to each request.
 - `screenshot=false` by default. A requested screenshot is available only on the
   browser path; choose `mode=js` when a screenshot is required.

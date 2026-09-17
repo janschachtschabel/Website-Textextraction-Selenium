@@ -53,8 +53,9 @@ def selenium_fetch(url, options, proxy_url, expires_at):
         frame_id = driver.execute_cdp_cmd("Page.getFrameTree", {})["frameTree"]["frame"]["id"]
         events = driver.get_log("performance")
         status, mime = navigation_status(events, frame_id)
+        settled = True
         if status is None or status < 400:
-            wait_for_content(driver, options, deadline)
+            settled = wait_for_content(driver, options, deadline)
         events.extend(driver.get_log("performance"))
         frame_id = driver.execute_cdp_cmd("Page.getFrameTree", {})["frameTree"]["frame"]["id"]
         status, mime = navigation_status(events, frame_id)
@@ -68,6 +69,8 @@ def selenium_fetch(url, options, proxy_url, expires_at):
         warnings = []
         if status is None:
             warnings.append("Browser could not observe the main document HTTP status")
+        if not settled:
+            warnings.append("Page content did not settle within the auto-wait limit; returning the current state")
         truncated = snapshot["truncated"] or len(data) > options.max_bytes
         if truncated:
             warnings.append("Rendered HTML truncated at max_bytes")
@@ -81,6 +84,7 @@ def selenium_fetch(url, options, proxy_url, expires_at):
             truncated,
             screenshot,
             warnings,
+            settled,
         )
     except WebDriverException as exc:
         raise CrawlError("Selenium navigation failed", 502) from exc

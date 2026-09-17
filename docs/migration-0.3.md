@@ -5,7 +5,8 @@ intentional contract corrections before upgrading a client:
 
 - Check `success`, not just API HTTP 200 or a nonempty Markdown string.
   Conversion failures no longer return explanatory prose as extracted content.
-  Skipped media is `skipped` with empty Markdown; partial responses set `truncated`.
+  Skipped media is `skipped` with empty Markdown; partial responses set `truncated`
+  or, for rendered pages that never settled, carry a warning (both `success=false`).
 - `status_code` is the upstream status and can be null when Chrome cannot observe
   it. `fetch_engine` and `converter` describe the actual successful path.
   `request_mode` remains the requested mode.

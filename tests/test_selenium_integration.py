@@ -52,6 +52,18 @@ async def browser(monkeypatch):
                 html = f'<main>Public content</main><iframe src="http://127.0.0.1:{port}/private"></iframe>'
             elif path == "/hang":
                 html = '<main aria-busy="true">Loading content</main>'
+            elif path == "/hidden-loader":
+                html = '<div role="progressbar" aria-hidden="true" style="height:0"><div></div></div><main>Loaded page</main>'
+            elif path == "/two-mains":
+                html = '<main style="height:0"></main><main>SECONDMAIN content</main>'
+            elif path == "/spinner":
+                html = '<main>PERMANENTSPINNER page</main><div role="progressbar" style="width:40px;height:40px"></div>'
+            elif path == "/late-main":
+                html = '<header>Site header navigation</header><main></main><script>setTimeout(()=>{document.querySelector("main").innerText="LATE"+"CONTENT arrived"},1500)</script>'
+            elif path == "/busy-list":
+                html = '<h1>Results</h1><div id="list" aria-busy="true"></div><script>setTimeout(()=>{const e=document.getElementById("list");e.innerText="LATE"+"CONTENT arrived";e.removeAttribute("aria-busy")},1500)</script>'
+            elif path == "/modal-spinner":
+                html = '<div aria-hidden="true"><main>Page behind a dialog</main><div role="progressbar" style="width:40px;height:40px"></div></div><div role="dialog">Consent</div><script>setTimeout(()=>{document.querySelector("[role=progressbar]").remove();document.querySelector("main").innerText="LATE"+"CONTENT arrived"},1500)</script>'
             else:
                 html = "<main>Page not found</main>" if status == 404 else "<main>Fixture page content</main>"
             data = ("<!doctype html><html><body>" + html + "</body></html>").encode()
@@ -114,6 +126,31 @@ async def test_profiles_do_not_share_cookies_and_private_subrequests_are_blocked
     result = await fetch("/subrequest")
     assert result.status_code == 200
     assert "/private" not in [path for path, _ in requests]
+
+
+@pytest.mark.parametrize("path", ["/hidden-loader", "/two-mains"])
+async def test_hidden_loader_and_empty_first_main_do_not_delay_readiness(browser, path):
+    fetch, _, _ = browser
+    started = time.monotonic()
+    result = await fetch(path, seconds=8, js_strategy="speed", js_auto_wait=True)
+    assert result.status_code == 200 and not result.warnings
+    assert time.monotonic() - started < 6
+
+
+@pytest.mark.parametrize("path", ["/late-main", "/busy-list", "/modal-spinner"])
+async def test_content_that_arrives_late_is_still_awaited(browser, path):
+    fetch, _, _ = browser
+    result = await fetch(path, seconds=20, js_strategy="speed", js_auto_wait=True)
+    assert b"LATECONTENT arrived" in result.data and result.settled
+
+
+async def test_permanent_spinner_does_not_use_up_the_deadline(browser):
+    fetch, _, _ = browser
+    started = time.monotonic()
+    result = await fetch("/spinner", seconds=30, js_strategy="speed", js_auto_wait=True)
+    assert time.monotonic() - started < 20
+    assert b"PERMANENTSPINNER" in result.data and not result.settled
+    assert any("settle" in warning for warning in result.warnings)
 
 
 async def test_browser_deadline_cleans_up_and_next_job_succeeds(browser):

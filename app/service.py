@@ -113,6 +113,7 @@ class CrawlService:
             and converted.markdown.strip()
             and not blocked
             and not fetched.truncated
+            and fetched.settled
             and fetched.status_code is not None
             and 200 <= fetched.status_code < 300
         )

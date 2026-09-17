@@ -9,11 +9,29 @@ from selenium.webdriver.common.by import By
 from .deadline import Deadline
 from .results import CrawlError
 
+# Pages can keep a spinner forever or render no text at all (e.g. a denied download). Auto-wait is
+# best effort: it stops this long after the explicit waits are met instead of waiting for the deadline.
+AUTO_WAIT_LIMIT_SECONDS = {"speed": 10.0, "accuracy": 20.0}
+
 SNAPSHOT = """
-const root = document.querySelector('main, article, [role=main]') || document.body;
-const visible = el => !!(el && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
-const busy = [...document.querySelectorAll('[aria-busy=true], [role=progressbar]')].some(visible);
-const text = root ? root.innerText : '';
+// Pages may contain an empty <main> before the real one: use the first candidate with text. If all
+// candidates are still empty, the first one is awaited; only pages without candidates use the body.
+let text = null;
+for (const el of document.querySelectorAll('main, article, [role=main]')) {
+  const candidate = el.innerText || '';
+  if (candidate.trim()) { text = candidate; break; }
+  if (text === null) text = candidate;
+}
+if (text === null) text = (document.body && document.body.innerText) || '';
+const rendered = el => !!(el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
+// A busy region counts while rendered, even while empty. Progressbars marked aria-hidden or without
+// size are hidden loaders.
+const spinning = el => {
+  const box = el.getBoundingClientRect();
+  return rendered(el) && !el.matches('[aria-hidden=true]') && box.width > 0 && box.height > 0;
+};
+const busy = [...document.querySelectorAll('[aria-busy=true]')].some(rendered)
+  || [...document.querySelectorAll('[role=progressbar]')].some(spinning);
 if (window.MathJax && MathJax.startup && MathJax.startup.promise && !window.__extractMathAttached) {
   window.__extractMathAttached = true;
   Promise.resolve(MathJax.startup.promise).then(() => window.__extractMathReady = true,
@@ -42,13 +60,20 @@ def navigation_status(entries, frame_id):
     return status, mime
 
 
-def wait_for_content(driver, options, deadline: Deadline):
+def wait_for_content(driver, options, deadline: Deadline) -> bool:
+    """Wait for selectors, the minimum wait and (optionally) settled content.
+
+    Returns False when auto-wait gave up on content that never settled. Its limit starts once the
+    selectors and the minimum wait are satisfied.
+    """
     if not (options.js_auto_wait or options.wait_for_selectors or options.wait_for_ms):
-        return
+        return True
     started = time.monotonic()
     changed = started
     previous = None
+    explicit_since = None
     stable_for = 0.3 if options.js_strategy == "speed" else 1.0
+    auto_wait_limit = AUTO_WAIT_LIMIT_SECONDS[options.js_strategy]
     while True:
         remaining = deadline.remaining()
         snapshot = driver.execute_script(SNAPSHOT)
@@ -72,6 +97,13 @@ def wait_for_content(driver, options, deadline: Deadline):
             and snapshot["math"]
             and now - changed >= stable_for
         )
-        if selected and minimum and (not options.js_auto_wait or content_ready):
-            return
+        if not (selected and minimum):
+            explicit_since = None
+        else:
+            if explicit_since is None:
+                explicit_since = now
+            if content_ready or not options.js_auto_wait:
+                return True
+            if now - explicit_since >= auto_wait_limit:
+                return False
         time.sleep(min(0.1, remaining))
