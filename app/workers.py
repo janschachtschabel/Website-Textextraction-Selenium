@@ -7,13 +7,27 @@ are fresh per job; Python imports and optional NLP models remain warm.
 import asyncio
 import multiprocessing
 import os
+import shutil
 import signal
 import subprocess
 import tempfile
 from contextlib import suppress
 
+from loguru import logger
+
 from .deadline import Deadline
 from .results import CrawlError
+
+# Windows keeps files of just-terminated Chrome processes locked for a moment. Such worker
+# directories are removed on a later attempt instead of failing the request that timed out.
+_leftover_directories: set[str] = set()
+
+
+def _remove_leftover_directories():
+    for path in list(_leftover_directories):
+        shutil.rmtree(path, ignore_errors=True)
+        if not os.path.exists(path):
+            _leftover_directories.discard(path)
 
 
 def _worker(incoming, outgoing, directory):
@@ -44,7 +58,8 @@ def _worker(incoming, outgoing, directory):
 
 class _Slot:
     def __init__(self):
-        self.directory = tempfile.TemporaryDirectory(prefix="extraction-worker-")
+        _remove_leftover_directories()
+        self.directory = tempfile.TemporaryDirectory(prefix="extraction-worker-", ignore_cleanup_errors=True)
         context = multiprocessing.get_context("spawn")
         incoming, self.sender = context.Pipe(duplex=False)
         self.receiver, outgoing = context.Pipe(duplex=False)
@@ -70,8 +85,11 @@ class _Slot:
         self.process.join(timeout=1)
         self.sender.close()
         self.receiver.close()
-        self.process.close()
+        with suppress(ValueError):  # still running despite the kill: nothing more to do here
+            self.process.close()
         self.directory.cleanup()
+        if os.path.exists(self.directory.name):
+            _leftover_directories.add(self.directory.name)
 
 
 class WorkerPool:
@@ -106,9 +124,13 @@ class WorkerPool:
             return reply[1]
         except BaseException:
             if slot is not None:
-                self.slots.discard(slot)
-                slot.stop()
-                slot = None
+                # Never hand a stopped worker back to the idle queue, even if cleanup fails.
+                dead, slot = slot, None
+                self.slots.discard(dead)
+                try:
+                    dead.stop()
+                except Exception as exc:
+                    logger.error("Worker cleanup failed ({})", type(exc).__name__)
             raise
         finally:
             if acquired and not self.closed:
@@ -124,6 +146,7 @@ class WorkerPool:
         for slot in self.slots:
             slot.stop()
         self.slots.clear()
+        _remove_leftover_directories()
 
     def stats(self):
         return {
