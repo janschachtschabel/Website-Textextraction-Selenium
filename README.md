@@ -22,10 +22,13 @@ cp .env.example .env
 python run.py
 ```
 
-Set `API_KEY` in `.env` before exposing the service. The examples below assume it
-is also exported in your shell. `/docs` documents the request and response schema;
+`HOST` defaults to `127.0.0.1`. Any other address requires `API_KEY`; the service
+refuses to start with a non-loopback host and no key. The examples below assume the
+key is also exported in your shell. `/docs`, `/redoc` and `/openapi.json` document
+the request and response schema and are served only while no key is configured.
 `/health` is public and reports process readiness even while all workers are busy.
-`/stats` uses the same Bearer authentication as the crawl endpoints.
+`/stats` uses the same Bearer authentication as the crawl endpoints. Request bodies
+above `MAX_REQUEST_BYTES` (1 MiB) are answered with 413 before authentication.
 
 For PDF and Office files, install `pip install -e '.[documents]'`. For local PII
 processing, install `pip install -e '.[pii]'` and then, for example,

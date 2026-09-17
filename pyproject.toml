@@ -61,7 +61,7 @@ dependencies = []  # inherits project.dependencies via editable install
 
 [tool.hatch.envs.default.scripts]
 serve    = "python run.py"
-dev      = "uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+dev      = "uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"
 lint     = "ruff check app tests helper/loadtest.py"
 fmt      = "ruff format app/"
 loadtest = "python helper/loadtest.py"

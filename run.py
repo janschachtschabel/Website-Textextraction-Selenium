@@ -7,7 +7,7 @@ Usage:
 
 For development with auto-reload use:
     hatch run dev
-    # or: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    # or: uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 """
 
 import uvicorn

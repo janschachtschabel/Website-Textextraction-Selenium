@@ -41,6 +41,7 @@ async def api(tmp_path, article_html):
         conversion_workers=1,
         default_retries=0,
         api_key=None,
+        host="127.0.0.1",
     )
     resources = Resources(
         config, transport=httpx.MockTransport(upstream), validate=lambda url: None, browser=NoBrowser()
@@ -111,7 +112,7 @@ async def test_anonymization_failure_returns_no_text_or_parallel_representation(
 
 
 async def test_auth_protects_both_crawl_routes_and_stats(tmp_path):
-    config = replace(settings, result_cache_dir=str(tmp_path), api_key="fixture-key")
+    config = replace(settings, result_cache_dir=str(tmp_path), api_key="fixture-key", host="127.0.0.1")
     app = create_app(config)
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:

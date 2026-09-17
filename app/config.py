@@ -1,11 +1,19 @@
 """Validated server defaults; request overrides are resolved in schemas.py."""
 
+import ipaddress
 import os
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def _is_loopback(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return host.lower() == "localhost"
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -19,7 +27,7 @@ def _bool(name: str, default: bool) -> bool:
 
 @dataclass(frozen=True)
 class Settings:
-    host: str = os.getenv("HOST", "0.0.0.0")
+    host: str = os.getenv("HOST", "127.0.0.1")
     port: int = int(os.getenv("PORT", "8000"))
     log_level: str = os.getenv("LOG_LEVEL", "INFO").upper()
     log_json: bool = _bool("LOG_JSON", False)
@@ -54,6 +62,7 @@ class Settings:
     presidio_de_model: str = os.getenv("PRESIDIO_DE_MODEL", "de_core_news_lg")
     presidio_en_model: str = os.getenv("PRESIDIO_EN_MODEL", "en_core_web_lg")
     uvicorn_workers: int = int(os.getenv("UVICORN_WORKERS", "1"))
+    max_request_bytes: int = int(os.getenv("MAX_REQUEST_BYTES", str(1024 * 1024)))
 
     def __post_init__(self):
         for name in (
@@ -89,6 +98,11 @@ class Settings:
         }.items():
             if getattr(self, name) not in choices:
                 raise ValueError(f"Invalid {name}")
+        if not 1024 <= self.max_request_bytes <= 100 * 1024 * 1024:
+            raise ValueError("MAX_REQUEST_BYTES must be 1024..104857600")
+        # An unauthenticated service on a reachable address is a crawling proxy for anyone who finds it.
+        if not self.api_key and not _is_loopback(self.host):
+            raise ValueError("Set API_KEY before binding HOST to a non-loopback address")
 
 
 settings = Settings()

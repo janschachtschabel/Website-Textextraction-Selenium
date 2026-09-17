@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from . import __version__
+from .body_limit import BodySizeLimit
 from .config import settings
 from .deadline import Deadline
 from .logging_setup import setup_logging
@@ -45,7 +46,16 @@ def create_app(config=settings, resources=None):
             application.state.resources = active
             yield
 
-    application = FastAPI(title="Website Text Extraction — Selenium", version=__version__, lifespan=lifespan)
+    # A key-protected deployment does not advertise its request surface.
+    application = FastAPI(
+        title="Website Text Extraction — Selenium",
+        version=__version__,
+        lifespan=lifespan,
+        docs_url=None if config.api_key else "/docs",
+        redoc_url=None if config.api_key else "/redoc",
+        openapi_url=None if config.api_key else "/openapi.json",
+    )
+    application.add_middleware(BodySizeLimit, max_bytes=config.max_request_bytes)
     bearer = HTTPBearer(auto_error=False)
 
     def check_auth(credentials: HTTPAuthorizationCredentials | None = Security(bearer)):
