@@ -122,7 +122,8 @@ remain overrides. `.env.example` lists all supported settings.
 - `js_strategy=speed`: eager navigation; blocks common image/font/media URLs unless
   a screenshot is requested. `accuracy` waits for normal page load.
 - `wait_for_selectors`: wait until all CSS selectors match visible elements.
-  Content stability, busy indicators and MathJax readiness replace fixed sleeps.
+  Content stability, busy indicators (`aria-busy`, visible progress bars without a
+  value) and MathJax readiness replace fixed sleeps.
   `wait_for_ms` is an optional minimum wait within the same deadline.
 - `js_auto_wait=true` waits for that readiness for at most 10 s (`speed`) or
   20 s (`accuracy`) once the selectors and `wait_for_ms` are satisfied; those two

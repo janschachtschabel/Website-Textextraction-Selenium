@@ -57,6 +57,8 @@ async def browser(monkeypatch):
                 html = '<main aria-busy="true">Loading content</main>'
             elif path == "/hidden-loader":
                 html = '<div role="progressbar" aria-hidden="true" style="height:0"><div></div></div><main>Loaded page</main>'
+            elif path == "/skill-bars":
+                html = '<main>Skills page</main><div role="progressbar" aria-valuenow="75" aria-valuemin="0" aria-valuemax="100" style="width:75%;height:20px"></div>'
             elif path == "/two-mains":
                 html = '<main style="height:0"></main><main>SECONDMAIN content</main>'
             elif path == "/spinner":
@@ -133,8 +135,8 @@ async def test_profiles_do_not_share_cookies_and_private_subrequests_are_blocked
     assert "/private" not in [path for path, _ in requests]
 
 
-@pytest.mark.parametrize("path", ["/hidden-loader", "/two-mains"])
-async def test_hidden_loader_and_empty_first_main_do_not_delay_readiness(browser, path):
+@pytest.mark.parametrize("path", ["/hidden-loader", "/skill-bars", "/two-mains"])
+async def test_hidden_or_static_progress_and_empty_first_main_do_not_delay_readiness(browser, path):
     fetch, _, _ = browser
     started = time.monotonic()
     result = await fetch(path, seconds=8, js_strategy="speed", js_auto_wait=True)

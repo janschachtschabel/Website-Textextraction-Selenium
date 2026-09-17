@@ -27,11 +27,12 @@ for (const el of document.querySelectorAll('main, article, [role=main]')) {
 }
 if (text === null) text = (document.body && document.body.innerText) || '';
 const rendered = el => !!(el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
-// A busy region counts while rendered, even while empty. Progressbars marked aria-hidden or without
-// size are hidden loaders.
+// A busy region counts while rendered, even while empty. Only indeterminate progressbars are loading
+// indicators: a value (aria-valuenow) marks static progress such as skill bars, and aria-hidden or a
+// missing size marks a hidden loader.
 const spinning = el => {
   const box = el.getBoundingClientRect();
-  return rendered(el) && !el.matches('[aria-hidden=true]') && box.width > 0 && box.height > 0;
+  return rendered(el) && !el.matches('[aria-hidden=true], [aria-valuenow]') && box.width > 0 && box.height > 0;
 };
 const busy = [...document.querySelectorAll('[aria-busy=true]')].some(rendered)
   || [...document.querySelectorAll('[role=progressbar]')].some(spinning);
