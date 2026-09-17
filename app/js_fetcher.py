@@ -4,7 +4,7 @@ import asyncio
 
 from selenium.common.exceptions import WebDriverException
 
-from .browser_readiness import navigation_status, wait_for_content
+from .browser_readiness import navigation_error, navigation_status, net_error_code, wait_for_content
 from .config import settings
 from .deadline import Deadline
 from .egress_proxy import EgressProxy
@@ -18,6 +18,18 @@ if (window.MathJax && MathJax.startup && MathJax.startup.document) {
   }
 }
 """
+
+
+def navigation_failed(code):
+    return CrawlError(f"Selenium navigation failed ({code})" if code else "Selenium navigation failed", 502)
+
+
+def main_frame(driver, events):
+    frame = driver.execute_cdp_cmd("Page.getFrameTree", {})["frameTree"]["frame"]
+    if frame["url"].startswith("chrome-error:"):
+        # Chrome shows its own page for certificate errors; that page is never content.
+        raise navigation_failed(navigation_error(events, frame["id"]))
+    return frame
 
 
 def selenium_fetch(url, options, proxy_url, expires_at):
@@ -50,15 +62,16 @@ def selenium_fetch(url, options, proxy_url, expires_at):
                 },
             )
         driver.get(url)
-        frame_id = driver.execute_cdp_cmd("Page.getFrameTree", {})["frameTree"]["frame"]["id"]
         events = driver.get_log("performance")
-        status, mime = navigation_status(events, frame_id)
+        frame = main_frame(driver, events)
+        status, mime = navigation_status(events, frame["id"])
+        # A download or an empty response leaves Chrome's initial blank page in place.
+        displayed = frame["url"].startswith(("http:", "https:"))
         settled = True
-        if status is None or status < 400:
+        if displayed and (status is None or status < 400):
             settled = wait_for_content(driver, options, deadline)
         events.extend(driver.get_log("performance"))
-        frame_id = driver.execute_cdp_cmd("Page.getFrameTree", {})["frameTree"]["frame"]["id"]
-        status, mime = navigation_status(events, frame_id)
+        status, mime = navigation_status(events, main_frame(driver, events)["id"])
         driver.execute_script(CAPTURE_MATH)
         snapshot = driver.execute_script(
             "const html = document.documentElement.outerHTML; "
@@ -67,6 +80,8 @@ def selenium_fetch(url, options, proxy_url, expires_at):
         )
         data = snapshot["html"].encode("utf-8")
         warnings = []
+        if not displayed:
+            warnings.append("Browser displayed no page (for example a download); use mode=auto or fast for files")
         if status is None:
             warnings.append("Browser could not observe the main document HTTP status")
         if not settled:
@@ -77,7 +92,7 @@ def selenium_fetch(url, options, proxy_url, expires_at):
         screenshot = driver.get_screenshot_as_base64() if options.screenshot and not options.anonymize else None
         return FetchResult(
             data[: options.max_bytes],
-            driver.current_url,
+            driver.current_url if displayed else url,
             status,
             "text/html; charset=utf-8" if mime in {None, "text/html", "application/xhtml+xml"} else mime,
             "selenium",
@@ -87,7 +102,8 @@ def selenium_fetch(url, options, proxy_url, expires_at):
             settled,
         )
     except WebDriverException as exc:
-        raise CrawlError("Selenium navigation failed", 502) from exc
+        # ChromeDriver raises for other failures, e.g. "unknown error: net::ERR_TUNNEL_CONNECTION_FAILED".
+        raise navigation_failed(net_error_code(exc.msg)) from exc
     finally:
         if driver is not None:
             try:

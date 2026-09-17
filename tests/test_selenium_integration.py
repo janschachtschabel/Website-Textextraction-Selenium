@@ -2,8 +2,10 @@
 
 import asyncio
 import os
+import ssl
 import time
 import traceback
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
 import pytest
@@ -44,6 +46,7 @@ async def browser(monkeypatch):
             path = head.split(" ")[1]
             requests.append((path, head))
             status = 404 if path == "/missing" else 200
+            content_type = "text/html; charset=utf-8"
             if path == "/dynamic":
                 html = '<main id="result" aria-busy="true"></main><script>setTimeout(()=>{let e=document.querySelector("main");e.innerText="DYNAMICCONTENT ready";e.setAttribute("aria-busy","false")},700)</script>'
             elif path == "/cookie":
@@ -64,11 +67,13 @@ async def browser(monkeypatch):
                 html = '<h1>Results</h1><div id="list" aria-busy="true"></div><script>setTimeout(()=>{const e=document.getElementById("list");e.innerText="LATE"+"CONTENT arrived";e.removeAttribute("aria-busy")},1500)</script>'
             elif path == "/modal-spinner":
                 html = '<div aria-hidden="true"><main>Page behind a dialog</main><div role="progressbar" style="width:40px;height:40px"></div></div><div role="dialog">Consent</div><script>setTimeout(()=>{document.querySelector("[role=progressbar]").remove();document.querySelector("main").innerText="LATE"+"CONTENT arrived"},1500)</script>'
+            elif path == "/download":
+                html, content_type = "<main>Lesson file</main>", "application/octet-stream"  # Chrome downloads it
             else:
                 html = "<main>Page not found</main>" if status == 404 else "<main>Fixture page content</main>"
             data = ("<!doctype html><html><body>" + html + "</body></html>").encode()
             writer.write(
-                f"HTTP/1.1 {status} Fixture\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {len(data)}\r\nConnection: close\r\n\r\n".encode()
+                f"HTTP/1.1 {status} Fixture\r\nContent-Type: {content_type}\r\nContent-Length: {len(data)}\r\nConnection: close\r\n\r\n".encode()
                 + data
             )
             await writer.drain()
@@ -94,7 +99,7 @@ async def browser(monkeypatch):
         async with EgressProxy() as guard:
 
             async def fetch(path, *, seconds=30, **kwargs):
-                url = f"http://fixture.example:{port}{path}"
+                url = path if "://" in path else f"http://fixture.example:{port}{path}"
                 options = resolve_options(CrawlRequest(url=url, mode="js", **kwargs))
                 deadline = Deadline(seconds)
                 return await pool.run(fixture_fetch, (url, options, guard.url, deadline.expires_at), deadline)
@@ -142,6 +147,72 @@ async def test_content_that_arrives_late_is_still_awaited(browser, path):
     fetch, _, _ = browser
     result = await fetch(path, seconds=20, js_strategy="speed", js_auto_wait=True)
     assert b"LATECONTENT arrived" in result.data and result.settled
+
+
+def self_signed_server_context(directory):
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "fixture.example")])
+    now = datetime.now(UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(x509.SubjectAlternativeName([x509.DNSName("fixture.example")]), critical=False)
+        .sign(key, hashes.SHA256())
+    )
+    cert_path, key_path = directory / "cert.pem", directory / "key.pem"
+    cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+    )
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert_path, key_path)
+    return context
+
+
+async def test_certificate_error_page_is_a_failure_not_content(browser, monkeypatch, tmp_path):
+    pytest.importorskip("cryptography")
+    fetch, _, _ = browser
+
+    async def page(reader, writer):
+        writer.close()
+
+    server = await asyncio.start_server(page, "127.0.0.1", 0, ssl=self_signed_server_context(tmp_path))
+    port = server.sockets[0].getsockname()[1]
+
+    def tls_target(url, protection=True):
+        if urlsplit(url).port == port:
+            return Target("fixture.example", port, ("127.0.0.1",), "https")
+        raise CrawlError("Non-fixture destination blocked", 400)
+
+    monkeypatch.setattr("app.egress_proxy.resolve_target", tls_target)
+    try:
+        with pytest.raises(CrawlError) as error:
+            await fetch(f"https://fixture.example:{port}/", seconds=20)
+        assert str(error.value) == "Selenium navigation failed (net::ERR_CERT_AUTHORITY_INVALID)"
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+async def test_rejected_tunnel_is_named_and_download_does_not_wait(browser):
+    fetch, _, _ = browser
+    with pytest.raises(CrawlError) as error:
+        await fetch("https://blocked.example/", seconds=15)
+    assert str(error.value).startswith("Selenium navigation failed (net::ERR_")
+    started = time.monotonic()
+    result = await fetch("/download", seconds=30, js_strategy="speed", js_auto_wait=True)
+    assert time.monotonic() - started < 8
+    assert any("download" in warning for warning in result.warnings)
 
 
 async def test_permanent_spinner_does_not_use_up_the_deadline(browser):

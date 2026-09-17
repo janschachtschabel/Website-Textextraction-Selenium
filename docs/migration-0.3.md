@@ -40,6 +40,9 @@ intentional contract corrections before upgrading a client:
   2 browser slots and 2 conversion slots, all lazy. Raising Uvicorn workers
   multiplies capacities. Cache/rate/metrics stores remain shared on one host;
   coalescing applies within a Uvicorn process.
+- Browser navigation errors (for example an untrusted certificate) return 502 like
+  HTTP download failures, naming Chrome's `net::ERR_*` code, instead of Chrome's
+  error page as Markdown.
 - TLS verification and Chrome sandboxing default to enabled. `SELENIUM_NO_SANDBOX`
   is an explicit opt-in for constrained development environments, used by the
   root-owned Colab demo. Configure real production sandbox support instead.

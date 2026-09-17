@@ -125,7 +125,7 @@ def test_rendered_html_is_bounded_before_webdriver_transfers_it(monkeypatch):
             pass
 
         def execute_cdp_cmd(self, method, params):
-            return {"frameTree": {"frame": {"id": "main"}}}
+            return {"frameTree": {"frame": {"id": "main", "url": "https://example.com/"}}}
 
         def get_log(self, kind):
             return [
@@ -157,3 +157,105 @@ def test_rendered_html_is_bounded_before_webdriver_transfers_it(monkeypatch):
     options = resolve_options(CrawlRequest(url="https://example.com", max_bytes=1024, js_auto_wait=False))
     result = js_fetcher.selenium_fetch("https://example.com", options, "http://127.0.0.1:1234", Deadline(5).expires_at)
     assert result.truncated and len(result.data) == 1024
+
+
+def log_entry(method, **params):
+    return {"message": json.dumps({"message": {"method": method, "params": params}})}
+
+
+class NavigationDriver:
+    """Fake Chrome whose main frame ends at `frame_url` after navigation."""
+
+    def __init__(self, frame_url, entries):
+        self.frame_url, self.entries = frame_url, entries
+        self.current_url = frame_url
+
+    def set_page_load_timeout(self, value):
+        pass
+
+    def set_script_timeout(self, value):
+        pass
+
+    def get(self, url):
+        pass
+
+    def execute_cdp_cmd(self, method, params):
+        return {"frameTree": {"frame": {"id": "main", "url": self.frame_url}}}
+
+    def get_log(self, kind):
+        entries, self.entries = self.entries, []
+        return entries
+
+    def execute_script(self, script, *args):
+        if args:
+            return {"html": "<html><head></head><body></body></html>", "truncated": False}
+        return {"text": "Displayed text", "busy": False, "ready": True, "math": True}
+
+    def quit(self):
+        pass
+
+
+@pytest.mark.parametrize(
+    "error_text, message",
+    [
+        ("net::ERR_CERT_AUTHORITY_INVALID", "Selenium navigation failed (net::ERR_CERT_AUTHORITY_INVALID)"),
+        ("unexpected <b>text</b>", "Selenium navigation failed"),
+    ],
+)
+def test_chrome_error_page_is_a_navigation_failure_not_content(monkeypatch, error_text, message):
+    from app import js_fetcher
+    from app.deadline import Deadline
+    from app.results import CrawlError
+
+    entries = [
+        log_entry("Network.requestWillBeSent", requestId="1", frameId="main", type="Document"),
+        log_entry("Network.loadingFailed", requestId="7", type="Document", errorText="net::ERR_ABORTED"),
+        log_entry("Network.loadingFailed", requestId="1", type="Document", errorText=error_text),
+    ]
+    driver = NavigationDriver("chrome-error://chromewebdata/", entries)
+    monkeypatch.setattr(js_fetcher, "create_driver", lambda *args: driver)
+    options = resolve_options(CrawlRequest(url="https://example.com", mode="js"))
+    with pytest.raises(CrawlError) as error:
+        js_fetcher.selenium_fetch("https://example.com", options, "http://127.0.0.1:1234", Deadline(5).expires_at)
+    assert (str(error.value), error.value.status_code) == (message, 502)
+
+
+def test_chromedriver_navigation_error_names_the_network_error(monkeypatch):
+    from selenium.common.exceptions import WebDriverException
+
+    from app import js_fetcher
+    from app.deadline import Deadline
+    from app.results import CrawlError
+
+    class RejectedTunnel(NavigationDriver):
+        def get(self, url):
+            raise WebDriverException("unknown error: net::ERR_TUNNEL_CONNECTION_FAILED\n  (Session info: chrome=1)")
+
+    monkeypatch.setattr(js_fetcher, "create_driver", lambda *args: RejectedTunnel("data:,", []))
+    options = resolve_options(CrawlRequest(url="https://example.com", mode="js"))
+    with pytest.raises(CrawlError) as error:
+        js_fetcher.selenium_fetch("https://example.com", options, "http://127.0.0.1:1234", Deadline(5).expires_at)
+    assert str(error.value) == "Selenium navigation failed (net::ERR_TUNNEL_CONNECTION_FAILED)"
+
+
+def test_download_is_reported_without_waiting_for_a_page(monkeypatch):
+    from app import js_fetcher
+    from app.deadline import Deadline
+
+    entries = [
+        log_entry(
+            "Network.responseReceived",
+            frameId="main",
+            type="Document",
+            response={"status": 200, "mimeType": "application/pdf"},
+        )
+    ]
+    # Chrome denies the download and keeps its initial blank page.
+    monkeypatch.setattr(js_fetcher, "create_driver", lambda *args: NavigationDriver("data:,", entries))
+    monkeypatch.setattr(js_fetcher, "wait_for_content", lambda *args: pytest.fail("No page to wait for"))
+    options = resolve_options(CrawlRequest(url="https://example.com/a.pdf", mode="js", js_auto_wait=True))
+    result = js_fetcher.selenium_fetch(
+        "https://example.com/a.pdf", options, "http://127.0.0.1:1234", Deadline(5).expires_at
+    )
+    assert any("download" in warning for warning in result.warnings)
+    assert result.final_url == "https://example.com/a.pdf"

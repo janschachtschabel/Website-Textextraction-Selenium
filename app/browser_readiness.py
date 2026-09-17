@@ -1,6 +1,7 @@
 """Bounded content readiness and main-frame network status observation."""
 
 import json
+import re
 import time
 
 from selenium.common.exceptions import InvalidSelectorException
@@ -12,6 +13,8 @@ from .results import CrawlError
 # Pages can keep a spinner forever or render no text at all (e.g. a denied download). Auto-wait is
 # best effort: it stops this long after the explicit waits are met instead of waiting for the deadline.
 AUTO_WAIT_LIMIT_SECONDS = {"speed": 10.0, "accuracy": 20.0}
+
+_NET_ERROR = re.compile(r"net::ERR_[A-Z0-9_]+")
 
 SNAPSHOT = """
 // Pages may contain an empty <main> before the real one: use the first candidate with text. If all
@@ -42,14 +45,18 @@ return {text: text, busy: busy, ready: document.readyState !== 'loading',
 """
 
 
+def _message(entry):
+    message = json.loads(entry["message"])["message"]
+    return message["method"], message.get("params", {})
+
+
 def navigation_status(entries, frame_id):
     status, mime = None, None
     for entry in entries:
         try:
-            message = json.loads(entry["message"])["message"]
-            params = message.get("params", {})
+            method, params = _message(entry)
             if (
-                message["method"] == "Network.responseReceived"
+                method == "Network.responseReceived"
                 and params.get("type") == "Document"
                 and params.get("frameId") == frame_id
             ):
@@ -58,6 +65,31 @@ def navigation_status(entries, frame_id):
         except (ValueError, KeyError, TypeError):
             continue  # Chrome also emits unrelated/non-network log records.
     return status, mime
+
+
+def navigation_error(entries, frame_id):
+    """Chrome's network error code for the main document, e.g. net::ERR_CERT_DATE_INVALID."""
+    documents, error = set(), None
+    for entry in entries:
+        try:
+            method, params = _message(entry)
+            if (
+                method == "Network.requestWillBeSent"
+                and params.get("type") == "Document"
+                and params.get("frameId") == frame_id
+            ):
+                documents.add(params["requestId"])
+            elif method == "Network.loadingFailed" and params.get("requestId") in documents:
+                error = params.get("errorText")
+        except (ValueError, KeyError, TypeError):
+            continue
+    return net_error_code(error)
+
+
+def net_error_code(text):
+    """Chrome's fixed network error code in `text`; public messages never carry other text."""
+    match = _NET_ERROR.search(text) if isinstance(text, str) else None
+    return match.group(0) if match else None
 
 
 def wait_for_content(driver, options, deadline: Deadline) -> bool:

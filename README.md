@@ -60,8 +60,10 @@ curl http://127.0.0.1:8000/crawl \
 A short useful page is a success. A cookie/privacy phrase or RSS discovery link
 alone does not trigger Selenium. HTTP errors and detected challenge pages do not
 trigger attempts to bypass the block. PDF, Office and feed bodies use document
-conversion rather than browser routing. Source LaTeX/MathML is preserved when
-available; formulas present only as pixels cannot be reconstructed reliably.
+conversion rather than browser routing. With `mode=js`, Chrome downloads such
+files instead of rendering them: the result has no text and a warning. Source
+LaTeX/MathML is preserved when available; formulas present only as pixels cannot
+be reconstructed reliably.
 
 Important result fields:
 
@@ -81,7 +83,9 @@ An HTTP 200 **from this API** can contain an upstream error or an unsuccessful
 extraction. Check `success`, `status_code` and `extraction_status`. Operational
 failures use a sanitized API error: 400 for prohibited/invalid destinations,
 422 for invalid options, 502 for fetch failures, 503 for queue/unavailable PII,
-and 504 for an expired deadline. Failed/partial results are not cached.
+and 504 for an expired deadline. Browser navigation errors, such as an untrusted
+certificate, are 502 fetch failures that name Chrome's `net::ERR_*` code; Chrome's
+own error page is never returned as content. Failed/partial results are not cached.
 
 ## Batch requests and deadlines
 
