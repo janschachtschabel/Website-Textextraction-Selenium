@@ -24,18 +24,7 @@ from .schemas import (
     CrawlResponse,
     resolve_options,
 )
-
-
-def _failure_reason(result: CrawlResponse) -> str:
-    if result.extraction_status != "ok":
-        return f"Extraction {result.extraction_status}"
-    if result.truncated:
-        return "Extraction truncated"
-    if result.status_code is None:
-        return "Upstream status unknown"
-    if not 200 <= result.status_code < 300:
-        return f"Upstream status {result.status_code}"
-    return "Extraction incomplete"  # e.g. a rendered page that never settled; see warnings
+from .service import failure_reason
 
 
 def create_app(config=settings, resources=None):
@@ -116,7 +105,7 @@ def create_app(config=settings, resources=None):
                     url=str(url),
                     success=result.success,
                     result=result,
-                    error=None if result.success else _failure_reason(result),
+                    error=None if result.success else failure_reason(result),
                 )
             except CrawlError as exc:
                 if not acquired:

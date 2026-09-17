@@ -30,6 +30,10 @@ the request and response schema and are served only while no key is configured.
 `/stats` uses the same Bearer authentication as the crawl endpoints. Request bodies
 above `MAX_REQUEST_BYTES` (1 MiB) are answered with 413 before authentication.
 
+Every failed crawl is logged as one line with host, mode, upstream status, extraction
+status and elapsed time - never the path or query string. `LOG_JSON=true` emits the
+same fields as JSON and, like the readable sink, without exception variable values.
+
 For PDF and Office files, install `pip install -e '.[documents]'`. For local PII
 processing, install `pip install -e '.[pii]'` and then, for example,
 `python -m spacy download de_core_news_lg`. Only the requested language is loaded,

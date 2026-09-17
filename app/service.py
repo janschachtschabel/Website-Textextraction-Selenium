@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from urllib.parse import urlsplit
 
 from loguru import logger
 
@@ -12,6 +13,19 @@ from .result_cache import make_cache_key
 from .results import CrawlError
 from .schemas import CrawlResponse
 from .worker_tasks import anonymize_document, prepare_document
+
+
+def failure_reason(result: CrawlResponse) -> str:
+    """Why success is false. Mirrors the rule in CrawlService._extract; change both together."""
+    if result.extraction_status != "ok":
+        return f"Extraction {result.extraction_status}"
+    if result.truncated:
+        return "Extraction truncated"
+    if result.status_code is None:
+        return "Upstream status unknown"
+    if not 200 <= result.status_code < 300:
+        return f"Upstream status {result.status_code}"
+    return "Extraction incomplete"  # e.g. a rendered page that never settled; see warnings
 
 
 class CrawlService:
@@ -30,12 +44,18 @@ class CrawlService:
         try:
             result = await deadline.run(self._cached(url, options, deadline))
             result.elapsed_ms = round((time.monotonic() - started) * 1000)
+            if not result.success:
+                self._log_failure(
+                    url, options, started, failure_reason(result), result.status_code, result.extraction_status
+                )
             return result
-        except CrawlError:
+        except CrawlError as exc:
+            self._log_failure(url, options, started, str(exc), exc.status_code)
             raise
         except Exception as exc:
-            logger.error("Unexpected extraction failure ({})", type(exc).__name__)
-            raise CrawlError("Unexpected extraction failure", 502) from exc
+            error = CrawlError("Unexpected extraction failure", 502)
+            self._log_failure(url, options, started, f"{error} ({type(exc).__name__})", 502, level="ERROR")
+            raise error from exc
         finally:
             await self.resources.metrics.record(
                 time.monotonic() - started,
@@ -43,6 +63,20 @@ class CrawlService:
                 bool(result and result.cached),
                 bool(result and result.coalesced),
             )
+
+    def _log_failure(self, url, options, started, reason, status, extraction=None, level="WARNING"):
+        # Host only: paths and query strings can carry tokens or personal data.
+        logger.log(
+            level,
+            "Crawl failed: {reason} (host={host} mode={mode} status={status} "
+            "extraction={extraction} elapsed_ms={elapsed_ms})",
+            reason=reason,
+            host=urlsplit(url).hostname,
+            mode=options.mode,
+            status=status,
+            extraction=extraction,
+            elapsed_ms=round((time.monotonic() - started) * 1000),
+        )
 
     async def _cached(self, url, options, deadline):
         resources = self.resources

@@ -56,6 +56,8 @@ def setup_logging(level: str = "INFO", json_logs: bool = False) -> None:
             format="{message}",
             serialize=True,
             enqueue=True,
+            backtrace=False,
+            diagnose=False,  # loguru defaults to True: traces would carry local values into the log pipeline
         )
     else:
         logger.add(
