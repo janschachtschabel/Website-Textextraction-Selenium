@@ -81,6 +81,42 @@ def test_declared_legacy_encoding_is_respected():
     assert "Grün" in markdown and "Wärmeübertragung" in markdown
 
 
+@pytest.mark.parametrize("content_type", ["text/html; charset=utf-8", "text/html"])
+def test_utf8_body_cut_inside_a_character_stays_readable(content_type):
+    data = "<html><p>Grün und größer: Wärmeübertragung.</p></html>".encode()
+    cut = data[: data.rindex("ü".encode()) + 1]  # max_bytes ended inside the last "ü"
+    markdown = bytes_to_markdown(cut, content_type, html_converter="bs4")
+    assert "Grün und größer: Wärme" in markdown
+
+
+def test_utf8_page_with_a_stray_byte_keeps_its_umlauts():
+    data = "<html><p>Grün und größer: Wärmeübertragung.</p></html>".encode().replace(b" und ", b" \x92 ")
+    markdown = bytes_to_markdown(data, "text/html; charset=utf-8", html_converter="bs4")
+    assert "Grün" in markdown and "Wärmeübertragung" in markdown
+
+
+@pytest.mark.parametrize(
+    "text, encoding, content_type, head",
+    [
+        ("日本語のテキスト", "iso-2022-jp", "text/html; charset=iso-2022-jp", ""),
+        ("日本語のテキスト", "iso-2022-jp", "text/html", '<meta charset="iso-2022-jp">'),
+        ("Привет мир", "utf-16-le", "text/html; charset=utf-16le", ""),
+    ],
+)
+def test_declared_charset_of_ascii_range_bytes_is_respected(text, encoding, content_type, head):
+    # These bytes are also valid UTF-8, so only the declaration tells how to read them.
+    data = f"<html>{head}<p>{text}</p></html>".encode(encoding)
+    assert data.isascii()
+    assert text in bytes_to_markdown(data, content_type, html_converter="bs4")
+
+
+@pytest.mark.parametrize("content_type", ["text/html; charset=utf-8", "text/html"])
+def test_legacy_page_without_or_with_wrong_charset_keeps_its_umlauts(content_type):
+    data = "<html><p>Grün und größer: Wärmeübertragung.</p></html>".encode("cp1252")
+    markdown = bytes_to_markdown(data, content_type, html_converter="bs4")
+    assert "Grün" in markdown and "Wärmeübertragung" in markdown
+
+
 def test_rendered_math_prefers_preserved_latex_over_svg_glyph_text():
     html = '<main><p>Equation <mjx-container data-latex="x^2+y^2=z^2"><svg><text>x2+y2</text></svg></mjx-container></p></main>'
     assert "x^2+y^2=z^2" in bytes_to_markdown(html.encode(), "text/html", html_converter="bs4")

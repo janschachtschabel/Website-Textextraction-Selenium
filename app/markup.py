@@ -6,6 +6,20 @@ from bs4 import BeautifulSoup, UnicodeDammit
 
 
 def decode_text(data: bytes, content_type: str | None = None) -> str:
+    # UnicodeDammit decodes strictly and then guesses: one bad byte, or a character cut at
+    # max_bytes, would turn a whole UTF-8 page into mojibake. Settle UTF-8 first. Bytes in the
+    # ASCII range keep their declared charset (ISO-2022-JP, UTF-16 without BOM).
+    if not data.isascii():
+        try:
+            return data.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            if exc.reason == "unexpected end of data":
+                return exc.object[: exc.start].decode("utf-8")
+        text = data.decode("utf-8-sig", errors="replace")
+        invalid = text.count("\ufffd")
+        non_ascii = len(text) - len(text.encode("ascii", errors="ignore"))
+        if non_ascii - invalid > invalid:
+            return text  # UTF-8 with a few stray bytes
     match = re.search(r'charset\s*=\s*["\']?([^;\s"\']+)', content_type or "", re.I)
     encoding = [match.group(1)] if match else []
     return UnicodeDammit(data, known_definite_encodings=encoding, is_html=True).unicode_markup or ""
