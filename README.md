@@ -4,13 +4,14 @@ An HTTP-first FastAPI service that extracts web pages and documents into Markdow
 It uses Trafilatura for main content, MarkItDown for document conversion, and
 Selenium/Chrome when JavaScript rendering is needed. No Playwright dependency.
 
-Version 0.3 corrects extraction, privacy, network safety and resource limits.
-See [migration notes](docs/migration-0.3.md) and the
+Version 0.4 closes the exposure gaps found in the September 2026 audit; 0.3 corrected
+extraction, privacy, network safety and resource limits. See the
+[changelog](CHANGELOG.md), the [migration notes](docs/migration-0.3.md) and the
 [audit remediation record](docs/audit-remediation.md).
 
 ## Install and run
 
-Python 3.11 or 3.12 and a local writable cache directory are required. Chrome is
+Python 3.11 to 3.13 and a local writable cache directory are required. Chrome is
 needed only for `mode=js` or an automatic browser fallback. Linux is the primary
 production and CI platform.
 
@@ -218,8 +219,10 @@ python -m build --no-isolation
 RUN_SELENIUM_TESTS=1 pytest -q tests/test_selenium_integration.py
 ```
 
-CI runs unit/API tests on Python 3.11 and 3.12 plus a separate real Chrome job.
-The browser fixtures cover dynamic text, upstream 404, isolated cookies,
+CI runs unit/API tests on Python 3.11, 3.12 and 3.13 plus a separate real Chrome job.
+The browser fixtures in `tests/test_selenium_integration.py` cover dynamic and late
+content, hidden and static progress indicators, a permanent spinner, an empty first
+`<main>`, certificate error pages, downloads, upstream 404, isolated cookies,
 subrequest blocking, screenshots and deadline cleanup.
 
 For benchmarks, put URLs in `helper/test_urls.txt`, export `API_BASE` and `API_KEY`,

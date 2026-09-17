@@ -15,7 +15,7 @@ description = "Bounded HTTP-first text extraction with isolated Selenium renderi
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"  # 3.11-3.13 run in CI
 
 dependencies = [
     "fastapi>=0.135.1,<1",
@@ -89,16 +89,11 @@ ignore = [
     "E501",    # line too long (handled by formatter)
     "B008",    # do not perform function calls in default arguments (FastAPI dependency injection)
     "SIM117",  # nested with statements (readability preference)
-    "UP007",   # X | Y union syntax (keep Optional for compatibility)
     "RUF001",  # ambiguous unicode in strings (intentional en-dashes / special chars)
     "RUF002",  # ambiguous unicode in docstrings (intentional: × in resolutions, – in ranges)
     "RUF003",  # ambiguous unicode in comments (intentional en-dashes)
     "SIM105",  # contextlib.suppress – try/except/pass is clearer in complex control flow
 ]
-
-[tool.ruff.lint.per-file-ignores]
-"app/schemas.py" = ["UP006", "UP007", "UP035"]  # keep List/Optional for Pydantic compat
-"colab_deployment_fixed.py" = ["E402"]  # intentional: print() before imports in Colab script
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

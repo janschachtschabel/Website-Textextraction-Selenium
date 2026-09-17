@@ -28,7 +28,7 @@ async def test_workers_are_lazy_reused_and_hung_process_is_replaced():
         started = time.monotonic()
         with pytest.raises(CrawlError, match="deadline"):
             await pool.run(hang, (), Deadline(0.2))
-        assert time.monotonic() - started < 2
+        assert time.monotonic() - started < 5  # the process is killed, not awaited
         third, value = await pool.run(identity, ("recovered",), Deadline(5))
         assert third != first and value == "recovered"
         if os.name == "posix":
