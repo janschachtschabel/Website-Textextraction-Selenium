@@ -28,6 +28,8 @@ async def api(tmp_path, article_html):
                 return httpx.Response(429, content=b"<main>Rate limited</main>", headers={"content-type": "text/html"})
             if request.url.path == "/empty":
                 return httpx.Response(200, content=b"", headers={"content-type": "text/html"})
+            if request.url.path == "/choices":
+                return httpx.Response(300, content=article_html.encode(), headers={"content-type": "text/html"})
             return httpx.Response(200, content=article_html.encode(), headers={"content-type": "text/html"})
         finally:
             state["active"] -= 1
@@ -175,6 +177,7 @@ async def test_unsettled_rendered_page_is_returned_but_not_a_cached_success(api)
     [
         ({"urls": ["https://example.com/long"], "mode": "fast", "max_bytes": 1024}, "Extraction truncated"),
         ({"urls": ["https://example.com/spinner"], "mode": "js"}, "Extraction incomplete"),
+        ({"urls": ["https://example.com/choices"], "mode": "fast"}, "Upstream status 300"),
     ],
 )
 async def test_batch_error_names_why_an_extracted_page_is_not_a_success(api, payload, error):

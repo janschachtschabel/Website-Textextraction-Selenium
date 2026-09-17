@@ -32,6 +32,8 @@ def _failure_reason(result: CrawlResponse) -> str:
         return "Extraction truncated"
     if result.status_code is None:
         return "Upstream status unknown"
+    if not 200 <= result.status_code < 300:
+        return f"Upstream status {result.status_code}"
     return "Extraction incomplete"  # e.g. a rendered page that never settled; see warnings
 
 
