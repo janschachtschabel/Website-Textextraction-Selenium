@@ -25,6 +25,16 @@ from .schemas import (
 )
 
 
+def _failure_reason(result: CrawlResponse) -> str:
+    if result.extraction_status != "ok":
+        return f"Extraction {result.extraction_status}"
+    if result.truncated:
+        return "Extraction truncated"
+    if result.status_code is None:
+        return "Upstream status unknown"
+    return "Extraction incomplete"  # e.g. a rendered page that never settled; see warnings
+
+
 def create_app(config=settings, resources=None):
     @asynccontextmanager
     async def lifespan(application):
@@ -94,7 +104,7 @@ def create_app(config=settings, resources=None):
                     url=str(url),
                     success=result.success,
                     result=result,
-                    error=None if result.success else f"Extraction {result.extraction_status}",
+                    error=None if result.success else _failure_reason(result),
                 )
             except CrawlError as exc:
                 if not acquired:

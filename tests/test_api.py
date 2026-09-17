@@ -170,6 +170,30 @@ async def test_unsettled_rendered_page_is_returned_but_not_a_cached_success(api)
     assert len(calls) == 2
 
 
+@pytest.mark.parametrize(
+    "payload, error",
+    [
+        ({"urls": ["https://example.com/long"], "mode": "fast", "max_bytes": 1024}, "Extraction truncated"),
+        ({"urls": ["https://example.com/spinner"], "mode": "js"}, "Extraction incomplete"),
+    ],
+)
+async def test_batch_error_names_why_an_extracted_page_is_not_a_success(api, payload, error):
+    from app.results import FetchResult
+
+    client, _, resources = api
+
+    class Browser:
+        async def fetch(self, url, options, deadline):
+            return FetchResult(
+                b"<main>Rendered lesson content.</main>", url, 200, "text/html", "selenium", settled=False
+            )
+
+    resources.browser = Browser()
+    item = (await client.post("/crawl/batch", json=payload)).json()["results"][0]
+    assert item["result"]["extraction_status"] == "ok" and not item["success"]
+    assert item["error"] == error
+
+
 def pii_backend(text, language):
     from app.schemas import AnonymizationResult
 
