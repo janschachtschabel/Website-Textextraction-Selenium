@@ -14,6 +14,22 @@ def test_selected_trafilatura_extracts_main_content(article_html):
     assert "NAVIGATIONTOKEN" not in markdown
 
 
+@pytest.mark.parametrize(
+    "layout",
+    [
+        "<h1>Optics and light</h1><div>{}</div>",
+        "<header><h1>Optics and light</h1></header><main>{}</main>",
+        "<article><h1>Optics and light</h1>{}</article>",  # trafilatura keeps this heading itself
+    ],
+)
+def test_trafilatura_output_starts_with_the_page_heading_once(layout):
+    paragraphs = "<p>Light travels through transparent materials and changes direction at a mirror.</p>" * 8
+    html = "<html><body>" + layout.format(paragraphs) + "</body></html>"
+    markdown = bytes_to_markdown(html.encode(), "text/html", html_converter="trafilatura")
+    assert markdown.startswith("# Optics and light\n\n")
+    assert markdown.count("Optics and light") == 1
+
+
 @pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="Linux descriptor inspection")
 def test_repeated_html_conversion_closes_descriptors(article_html, monkeypatch):
     import tempfile

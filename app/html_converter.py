@@ -27,6 +27,13 @@ def markitdown_stream(data: bytes, content_type: str | None, extension: str, url
     return result.text_content.strip()
 
 
+def with_heading(text: str | None, heading: str) -> str | None:
+    # Trafilatura keeps the page heading only when it sits inside the detected main content.
+    if text and heading and heading not in " ".join(text.split()):
+        return f"# {heading}\n\n{text}"
+    return text
+
+
 def convert_html(
     data: bytes, content_type: str | None, url: str | None, converter: str, clean: bool
 ) -> ConversionResult:
@@ -49,19 +56,24 @@ def convert_html(
     if not soup.get_text(" ", strip=True):
         return ConversionResult()
     html = str(soup)
+    h1 = soup.find("h1")
+    heading = " ".join(h1.get_text(" ", strip=True).split()) if h1 else ""
     warnings = []
     candidates = [converter] + (["markitdown", "bs4"] if converter == "trafilatura" else ["bs4"])
     for candidate in dict.fromkeys(candidates):
         try:
             if candidate == "trafilatura":
                 text = (
-                    extract(
-                        html,
-                        url=url,
-                        output_format="markdown",
-                        include_links=True,
-                        include_tables=True,
-                        include_comments=False,
+                    with_heading(
+                        extract(
+                            html,
+                            url=url,
+                            output_format="markdown",
+                            include_links=True,
+                            include_tables=True,
+                            include_comments=False,
+                        ),
+                        heading,
                     )
                     if clean
                     else html2txt(html)

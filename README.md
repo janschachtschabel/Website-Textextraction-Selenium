@@ -114,7 +114,10 @@ cleanup can add a short margin to the response deadline.
 Omitted/null configurable options inherit `.env` values. Explicit `false` and `0`
 remain overrides. `.env.example` lists all supported settings.
 
-- `html_converter`: `trafilatura` (default), `markitdown`, or `bs4`.
+- `html_converter`: `trafilatura` (default), `markitdown`, or `bs4`. Trafilatura
+  output starts with the page's first `<h1>`, also when it sits outside the main
+  content. For overview pages with little running text, `markitdown` keeps more,
+  including navigation.
 - `trafilatura_clean_markdown=false`: Trafilatura's raw text extraction.
 - `max_bytes`: bounds decoded HTTP output and rendered HTML; truncation is explicit.
   Compressed HTTP input is decoded with a bounded output allocation. For Chrome,
