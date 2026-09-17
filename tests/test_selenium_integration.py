@@ -48,7 +48,7 @@ async def browser(monkeypatch):
             status = 404 if path == "/missing" else 200
             content_type = "text/html; charset=utf-8"
             if path == "/dynamic":
-                html = '<main id="result" aria-busy="true"></main><script>setTimeout(()=>{let e=document.querySelector("main");e.innerText="DYNAMICCONTENT ready";e.setAttribute("aria-busy","false")},700)</script>'
+                html = '<main id="result" aria-busy="true"></main><script>setTimeout(()=>{let e=document.querySelector("main");e.innerText="DYNAMIC"+"CONTENT ready";e.setAttribute("aria-busy","false")},700)</script>'
             elif path == "/cookie":
                 html = '<main>Session page</main><script>document.cookie="private_session=one; path=/"</script>'
             elif path == "/subrequest":
