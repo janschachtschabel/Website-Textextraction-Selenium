@@ -14,20 +14,52 @@ def test_selected_trafilatura_extracts_main_content(article_html):
     assert "NAVIGATIONTOKEN" not in markdown
 
 
+PARAGRAPHS = "<p>Light travels through transparent materials and changes direction at a mirror.</p>" * 8
+
+
+def trafilatura_markdown(body):
+    html = "<html><body>" + body.replace("{}", PARAGRAPHS) + "</body></html>"
+    return bytes_to_markdown(html.encode(), "text/html", html_converter="trafilatura")
+
+
 @pytest.mark.parametrize(
-    "layout",
+    "layout, heading",
     [
-        "<h1>Optics and light</h1><div>{}</div>",
-        "<header><h1>Optics and light</h1></header><main>{}</main>",
-        "<article><h1>Optics and light</h1>{}</article>",  # trafilatura keeps this heading itself
+        ("<h1>{}</h1><div>{{}}</div>", "Optics and light"),
+        ("<header><h1>{}</h1></header><main>{{}}</main>", "Optics and light"),
+        ("<header><h1>{}</h1></header><main>{{}}</main>", "<b>Ohm</b>sche Gesetze"),
+        ("<header><h1>{}</h1></header><main>{{}}</main>", "Das Molekül H<sub>2</sub>O"),
+        ("<header><h1>{}</h1></header><main>{{}}</main>", "Intro to<br>optics"),
     ],
 )
-def test_trafilatura_output_starts_with_the_page_heading_once(layout):
-    paragraphs = "<p>Light travels through transparent materials and changes direction at a mirror.</p>" * 8
-    html = "<html><body>" + layout.format(paragraphs) + "</body></html>"
-    markdown = bytes_to_markdown(html.encode(), "text/html", html_converter="trafilatura")
-    assert markdown.startswith("# Optics and light\n\n")
-    assert markdown.count("Optics and light") == 1
+def test_trafilatura_output_gets_the_page_heading_it_dropped(layout, heading):
+    markdown = trafilatura_markdown(layout.format(heading))
+    expected = {"<b>Ohm</b>sche": "Ohmsche", "H<sub>2</sub>O": "H2O", "<br>": " "}
+    for markup, text in expected.items():
+        heading = heading.replace(markup, text)
+    assert markdown.startswith(f"# {heading}\n\n")
+
+
+@pytest.mark.parametrize(
+    "heading",
+    ["Optics and light", "Intro to <em>Optics</em>", '<a href="/optics">Optics</a> and light', "H<sub>2</sub>O"],
+)
+def test_trafilatura_page_heading_it_kept_is_not_repeated(heading):
+    markdown = trafilatura_markdown(f"<article><h1>{heading}</h1>{{}}</article>")
+    assert sum(line.startswith("# ") for line in markdown.splitlines()) == 1
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        '<header><h1 class="sr-only">Hauptnavigation</h1></header><main><h2>Optics</h2>{}</main>',
+        "<header><h1 hidden>Hauptnavigation</h1></header><main><h2>Optics</h2>{}</main>",
+        "<header><h1>Hauptnavigation</h1></header><article><h1>Optics</h1>{}</article>",
+        "<h1>" + "Hauptnavigation " * 20 + "</h1><div>{}</div>",  # an unclosed heading swallowed the page
+    ],
+)
+def test_hidden_logo_or_overlong_h1_does_not_become_the_heading(body):
+    assert not trafilatura_markdown(body).startswith("# Hauptnavigation")
 
 
 @pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="Linux descriptor inspection")
