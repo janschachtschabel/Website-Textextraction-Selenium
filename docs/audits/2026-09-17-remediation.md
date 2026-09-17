@@ -14,7 +14,7 @@ on Python 3.13.15.
 | A04 | `diagnose=True` in the JSON log sink | Fixed: `diagnose`/`backtrace` off | `ecfe566` |
 | A05 | Failed crawls not logged server-side | Fixed: one structured line per failure | `ecfe566` |
 | A06 | Clients can disable the operator rate limit | Fixed: the server default is a ceiling | `063870f` |
-| A07 | No lockfile, no dependency scan in CI | Partly fixed: `constraints.txt` and a `pip-audit` step once per workflow; see follow-ups | `6bdf614`, `f197678`, `<audit-step>` |
+| A07 | No lockfile, no dependency scan in CI | Partly fixed: `constraints.txt` and a `pip-audit` step once per workflow; see follow-ups | `6bdf614`, `f197678`, `d8fc363` |
 | A08 | `links` feature untested | Fixed: 33 cases for extraction and classification | `fa4f82c` |
 | A09 | HTML parsed up to three times | Partly fixed: routing parse removed outside auto mode; see follow-ups | `d56f751` |
 | A10 | Dead helpers contradicting documented behaviour | Fixed: removed, rest moved to `app/links.py` | `1761823` |
@@ -40,7 +40,8 @@ on Python 3.13.15.
   no hashes and was resolved on Windows. A `--require-hashes` lock has to be produced on
   the target platform, which this repository cannot verify from a Windows checkout. CI
   still installs the newest compatible releases on purpose, so upstream breakage surfaces
-  early; `pip-audit` gates every build.
+  early; `pip-audit` gates every build, once per workflow because the advisory service
+answers the same for every entry of the matrix.
 - **One parse per document (A09).** Sharing the parsed tree between conversion and link
   extraction requires `convert_document` to hand out its soup, which would change its
   contract for every content type. The remaining second parse only happens when
