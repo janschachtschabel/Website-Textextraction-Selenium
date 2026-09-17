@@ -165,7 +165,7 @@ class CrawlService:
         converted, use_browser, links = await resources.conversion_pool.run(
             prepare_document, (fetched, options, deadline.expires_at), deadline
         )
-        if options.mode == "auto" and use_browser:
+        if use_browser:  # prepare_document only proposes this in auto mode
             fetched = await resources.browser.fetch(fetched.final_url, options, deadline)
             converted, _, links = await resources.conversion_pool.run(
                 prepare_document, (fetched, options, deadline.expires_at), deadline

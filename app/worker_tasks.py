@@ -21,7 +21,9 @@ def prepare_document(fetched, options, expires_at):
     links = None
     if options.extract_links and not options.anonymize and "html" in (fetched.content_type or ""):
         links = extract_links_detailed_from_html(decode_text(fetched.data, fetched.content_type), fetched.final_url)
-    return converted, needs_browser(fetched, converted), links
+    # Routing parses the document again, and only auto mode can act on the answer.
+    use_browser = options.mode == "auto" and needs_browser(fetched, converted)
+    return converted, use_browser, links
 
 
 def anonymize_document(text, language):

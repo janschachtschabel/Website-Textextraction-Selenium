@@ -1,4 +1,7 @@
 import json
+import time
+
+import pytest
 
 from app.converter import convert_document
 
@@ -59,3 +62,25 @@ def test_markitdown_cannot_dispatch_a_source_url_to_remote_site_converters(monke
     monkeypatch.setattr(html_converter._local, "markitdown", Converter(), raising=False)
     html_converter.markitdown_stream(b"<p>local</p>", "text/html", ".html", "https://www.youtube.com/watch?v=123")
     assert seen == [None]
+
+
+@pytest.mark.parametrize("mode, routed", [("auto", True), ("fast", False), ("js", False)])
+def test_browser_routing_is_computed_only_for_auto_mode(monkeypatch, mode, routed):
+    from app import preflight
+    from app.config import settings
+    from app.results import FetchResult
+    from app.schemas import CrawlRequest, resolve_options
+    from app.worker_tasks import prepare_document
+
+    checks = []
+    monkeypatch.setattr(preflight, "needs_browser", lambda fetched, converted: bool(checks.append(mode)) or True)
+    fetched = FetchResult(
+        b"<html><body><div id='root'></div><script src='/app.js'></script></body></html>",
+        "https://example.com/app",
+        200,
+        "text/html",
+    )
+    options = resolve_options(CrawlRequest(url="https://example.com/app", mode=mode), settings)
+    _, use_browser, _ = prepare_document(fetched, options, time.monotonic() + 30)
+    assert bool(checks) is routed
+    assert use_browser is routed
