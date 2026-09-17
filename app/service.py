@@ -96,7 +96,9 @@ class CrawlService:
             async with self.capacity.slot(deadline):
                 result = await self._extract(url, options, deadline)
             if result.success and self.config.result_cache_ttl:
-                await resources.io(resources.cache.set, key, result.model_dump(), expire=self.config.result_cache_ttl)
+                await resources.io(
+                    resources.cache.set, key, result.model_dump(mode="json"), expire=self.config.result_cache_ttl
+                )
             future.set_result(result)
             return result
         except BaseException as exc:

@@ -193,6 +193,11 @@ this is not a distributed coalescing service. Cache keys include effective optio
 media policy, model identity and a format version. `force_refresh=true` bypasses
 lookup and refreshes the successful result. TTL 0 disables result caching.
 
+Both stores hold JSON, never pickled objects, and live in `results-json-v1` and
+`state-json-v1` under `RESULT_CACHE_DIR`. On POSIX the service refuses to start when
+that directory is readable by anyone but its owner. Cached data is derived, so
+directories from earlier versions can simply be deleted.
+
 Rate limits count document attempts: HTTP requests, HTTP redirects/retries and
 browser initial navigation/retries. Browser assets and internal browser redirects
 are not counted separately. Fractional values such as 0.5 requests/s work, and

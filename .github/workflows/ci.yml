@@ -19,6 +19,9 @@ jobs:
       - run: python -m pip install -e '.[dev,documents,loadtest]'
       - run: ruff check app tests helper/loadtest.py
       - run: pytest -q -m 'not selenium'
+      # diskcache has no fixed release for PYSEC-2026-2447 (pickle deserialization);
+      # the service stores JSON in a private directory instead. Any other advisory fails the build.
+      - run: pip-audit --ignore-vuln PYSEC-2026-2447
       - run: python -m compileall -q app helper run.py
       - run: python -m build --no-isolation
   selenium:

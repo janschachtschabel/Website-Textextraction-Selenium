@@ -18,6 +18,14 @@ from .security import resolve_target
 from .service import CrawlService
 from .workers import WorkerPool
 
+# Tracks the on-disk layout (JSON values, one directory per store). Result identity is
+# versioned separately in result_cache.CACHE_VERSION; the two change for different reasons.
+STORAGE_LAYOUT = "json-v1"
+
+
+def private_to_owner(info, uid: int) -> bool:
+    return info.st_uid == uid and not info.st_mode & 0o077
+
 
 class Resources:
     def __init__(self, config, *, transport=None, validate=None, browser=None):
@@ -39,11 +47,20 @@ class Resources:
             else Path(os.getenv("XDG_CACHE_HOME", Path.home() / ".cache")) / "website-text-extraction"
         )
         base.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # mkdir's mode only applies to a directory this process creates.
+        if os.name == "posix" and not private_to_owner(base.stat(), os.getuid()):
+            raise RuntimeError(f"{base} must be private to the service user (mode 0700)")
+        # JSONDisk instead of the default pickle: whoever can write here would otherwise
+        # execute code in this process when a cached result is read (CVE-2025-69872).
         self.cache = diskcache.Cache(
-            str(base / "results-v3"), size_limit=self.config.result_cache_max_size * 1024 * 1024
+            str(base / f"results-{STORAGE_LAYOUT}"),
+            disk=diskcache.JSONDisk,
+            size_limit=self.config.result_cache_max_size * 1024 * 1024,
         )
         try:
-            self.state = diskcache.Cache(str(base / "state-v3"), eviction_policy="none")
+            self.state = diskcache.Cache(
+                str(base / f"state-{STORAGE_LAYOUT}"), disk=diskcache.JSONDisk, eviction_policy="none"
+            )
             self.state.expire()
         except BaseException:
             self.cache.close()
