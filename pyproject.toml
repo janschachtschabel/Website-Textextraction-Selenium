@@ -40,7 +40,8 @@ dev = [
     "pytest-asyncio>=0.25.0,<2",
     "build>=1.2,<2",
     "hatchling>=1.27",
-    "cryptography>=42,<50",  # self-signed certificate for the browser TLS test
+    "cryptography>=50",  # self-signed certificate for the browser TLS test; no upper bound (blocks fixes)
+    "pip-audit>=2.9,<3",  # dependency advisories, also run in CI
 ]
 loadtest = ["aiohttp>=3.9.0,<4", "matplotlib>=3.9.0,<4", "numpy>=1.26.0,<3"]
 

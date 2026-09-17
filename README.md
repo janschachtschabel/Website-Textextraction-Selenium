@@ -36,6 +36,12 @@ processing, install `pip install -e '.[pii]'` and then, for example,
 on first use. Models are never downloaded while processing a request.
 `requirements.txt` installs the same core dependencies from `pyproject.toml`.
 
+The declared ranges resolve to the newest compatible releases, which is what CI
+tests. For a deployment that must resolve the same way twice, install against the
+verified set: `pip install -e '.[documents]' -c constraints.txt`. Refresh that file
+by re-resolving without it, running both suites and `pip-audit`, then
+`pip freeze --exclude-editable`.
+
 Preinstall compatible Chrome and ChromeDriver binaries in production and set
 `CHROME_BINARY` and `CHROMEDRIVER_PATH`. Otherwise Selenium Manager locates/downloads
 them. Chrome sandboxing and TLS verification are enabled by default.
