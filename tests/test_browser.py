@@ -220,6 +220,34 @@ def test_chrome_error_page_is_a_navigation_failure_not_content(monkeypatch, erro
     assert (str(error.value), error.value.status_code) == (message, 502)
 
 
+def test_chrome_page_for_an_empty_error_response_keeps_the_status_without_its_text(monkeypatch):
+    from app import js_fetcher
+    from app.deadline import Deadline
+
+    entries = [
+        log_entry("Network.requestWillBeSent", requestId="1", frameId="main", type="Document"),
+        log_entry(
+            "Network.responseReceived",
+            requestId="1",
+            frameId="main",
+            type="Document",
+            response={"status": 404, "mimeType": "text/html"},
+        ),
+        log_entry(
+            "Network.loadingFailed", requestId="1", type="Document", errorText="net::ERR_HTTP_RESPONSE_CODE_FAILURE"
+        ),
+    ]
+    driver = NavigationDriver("chrome-error://chromewebdata/", entries)
+    driver.current_url = "https://example.com/missing"
+    monkeypatch.setattr(js_fetcher, "create_driver", lambda *args: driver)
+    options = resolve_options(CrawlRequest(url="https://example.com/missing", mode="js"))
+    result = js_fetcher.selenium_fetch(
+        "https://example.com/missing", options, "http://127.0.0.1:1234", Deadline(5).expires_at
+    )
+    assert (result.status_code, result.data, result.warnings) == (404, b"", [])
+    assert result.final_url == "https://example.com/missing"
+
+
 def test_chromedriver_navigation_error_names_the_network_error(monkeypatch):
     from selenium.common.exceptions import WebDriverException
 

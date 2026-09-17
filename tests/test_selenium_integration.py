@@ -45,7 +45,7 @@ async def browser(monkeypatch):
             head = (await reader.readuntil(b"\r\n\r\n")).decode("latin-1")
             path = head.split(" ")[1]
             requests.append((path, head))
-            status = 404 if path == "/missing" else 200
+            status = 404 if path in {"/missing", "/empty-404"} else 200
             content_type = "text/html; charset=utf-8"
             if path == "/dynamic":
                 html = '<main id="result" aria-busy="true"></main><script>setTimeout(()=>{let e=document.querySelector("main");e.innerText="DYNAMIC"+"CONTENT ready";e.setAttribute("aria-busy","false")},700)</script>'
@@ -73,7 +73,7 @@ async def browser(monkeypatch):
                 html, content_type = "<main>Lesson file</main>", "application/octet-stream"  # Chrome downloads it
             else:
                 html = "<main>Page not found</main>" if status == 404 else "<main>Fixture page content</main>"
-            data = ("<!doctype html><html><body>" + html + "</body></html>").encode()
+            data = b"" if path == "/empty-404" else ("<!doctype html><html><body>" + html + "</body></html>").encode()
             writer.write(
                 f"HTTP/1.1 {status} Fixture\r\nContent-Type: {content_type}\r\nContent-Length: {len(data)}\r\nConnection: close\r\n\r\n".encode()
                 + data
@@ -123,6 +123,9 @@ async def test_dynamic_content_screenshot_and_real_404(browser):
     assert rendered.screenshot_base64.startswith("iVBOR")
     missing = await fetch("/missing")
     assert missing.status_code == 404 and missing.engine == "selenium"
+    # Chrome shows its own page for an error status without a body; keep the status, drop its text.
+    empty = await fetch("/empty-404")
+    assert (empty.status_code, empty.data) == (404, b"")
 
 
 async def test_profiles_do_not_share_cookies_and_private_subrequests_are_blocked(browser):

@@ -24,11 +24,18 @@ def navigation_failed(code):
     return CrawlError(f"Selenium navigation failed ({code})" if code else "Selenium navigation failed", 502)
 
 
+def web_url(value):
+    """False for Chrome's own pages: its blank start page (kept by a download) and error pages."""
+    return value.startswith(("http:", "https:"))
+
+
 def main_frame(driver, events):
     frame = driver.execute_cdp_cmd("Page.getFrameTree", {})["frameTree"]["frame"]
     if frame["url"].startswith("chrome-error:"):
-        # Chrome shows its own page for certificate errors; that page is never content.
-        raise navigation_failed(navigation_error(events, frame["id"]))
+        error = navigation_error(events, frame["id"])
+        # Chrome also shows its page for an error status without a body; the server did respond.
+        if error != "net::ERR_HTTP_RESPONSE_CODE_FAILURE":
+            raise navigation_failed(error)
     return frame
 
 
@@ -65,34 +72,36 @@ def selenium_fetch(url, options, proxy_url, expires_at):
         events = driver.get_log("performance")
         frame = main_frame(driver, events)
         status, mime = navigation_status(events, frame["id"])
-        # A download or an empty response leaves Chrome's initial blank page in place.
-        displayed = frame["url"].startswith(("http:", "https:"))
         settled = True
-        if displayed and (status is None or status < 400):
+        if web_url(frame["url"]) and (status is None or status < 400):
             settled = wait_for_content(driver, options, deadline)
         events.extend(driver.get_log("performance"))
-        status, mime = navigation_status(events, main_frame(driver, events)["id"])
-        driver.execute_script(CAPTURE_MATH)
-        snapshot = driver.execute_script(
-            "const html = document.documentElement.outerHTML; "
-            "return {html: html.slice(0, arguments[0]), truncated: html.length > arguments[0]};",
-            options.max_bytes,
-        )
-        data = snapshot["html"].encode("utf-8")
+        frame = main_frame(driver, events)
+        status, mime = navigation_status(events, frame["id"])
         warnings = []
-        if not displayed:
-            warnings.append("Browser displayed no page (for example a download); use mode=auto or fast for files")
+        if web_url(frame["url"]):
+            driver.execute_script(CAPTURE_MATH)
+            snapshot = driver.execute_script(
+                "const html = document.documentElement.outerHTML; "
+                "return {html: html.slice(0, arguments[0]), truncated: html.length > arguments[0]};",
+                options.max_bytes,
+            )
+            data = snapshot["html"].encode("utf-8")
+            truncated = snapshot["truncated"] or len(data) > options.max_bytes
+        else:
+            data, truncated = b"", False  # Chrome's own page is never content
+            if status is None or status < 400:
+                warnings.append("Browser displayed no page (for example a download); use mode=auto or fast for files")
         if status is None:
             warnings.append("Browser could not observe the main document HTTP status")
         if not settled:
             warnings.append("Page content did not settle within the auto-wait limit; returning the current state")
-        truncated = snapshot["truncated"] or len(data) > options.max_bytes
         if truncated:
             warnings.append("Rendered HTML truncated at max_bytes")
         screenshot = driver.get_screenshot_as_base64() if options.screenshot and not options.anonymize else None
         return FetchResult(
             data[: options.max_bytes],
-            driver.current_url if displayed else url,
+            driver.current_url if web_url(driver.current_url) else url,
             status,
             "text/html; charset=utf-8" if mime in {None, "text/html", "application/xhtml+xml"} else mime,
             "selenium",
