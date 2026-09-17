@@ -93,6 +93,12 @@ def resolve_options(request: CrawlOptions, config: Settings = settings) -> Crawl
         "crawl_rate_limit_rps": config.default_domain_rate_limit_rps,
     }
     values.update({name: value for name, value in defaults.items() if values[name] is None})
+    # A politeness limit the operator sets is a ceiling: a client may crawl a domain more
+    # slowly, but not faster, and cannot switch the limit off with 0.
+    ceiling = config.default_domain_rate_limit_rps
+    if ceiling > 0:
+        requested = values["crawl_rate_limit_rps"]
+        values["crawl_rate_limit_rps"] = min(requested, ceiling) if requested else ceiling
     return CrawlOptions(**values)
 
 

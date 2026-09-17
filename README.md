@@ -200,8 +200,9 @@ directories from earlier versions can simply be deleted.
 
 Rate limits count document attempts: HTTP requests, HTTP redirects/retries and
 browser initial navigation/retries. Browser assets and internal browser redirects
-are not counted separately. Fractional values such as 0.5 requests/s work, and
-per-request overrides take effect for that acquisition. Global and per-host
+are not counted separately. Fractional values such as 0.5 requests/s work. A
+`DEFAULT_DOMAIN_RATE_LIMIT_RPS` above 0 is a ceiling: `crawl_rate_limit_rps` can only
+lower it for a request, and 0 no longer disables it. Global and per-host
 reservations are atomic across workers. Metrics keep 60 minute aggregates;
 reported percentile latencies are histogram approximations and exclude cache hits
 and coalesced requests.

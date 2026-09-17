@@ -62,3 +62,17 @@ def test_unavailable_pii_engine_never_returns_original_text(monkeypatch):
         anonymizer.anonymize("Contact alice@example.com", "de")
     assert error.value.status_code == 503
     assert "alice@example.com" not in str(error.value)
+
+
+@pytest.mark.parametrize("requested, effective", [(None, 2.0), (0, 2.0), (5, 2.0), (0.5, 0.5)])
+def test_operator_domain_rate_limit_is_a_ceiling(requested, effective):
+    custom = replace(settings, default_domain_rate_limit_rps=2)
+    options = resolve_options(CrawlRequest(url="https://example.com", crawl_rate_limit_rps=requested), custom)
+    assert options.crawl_rate_limit_rps == effective
+
+
+@pytest.mark.parametrize("requested, effective", [(None, 0.0), (7, 7.0)])
+def test_clients_choose_the_rate_when_the_operator_sets_none(requested, effective):
+    custom = replace(settings, default_domain_rate_limit_rps=0)
+    options = resolve_options(CrawlRequest(url="https://example.com", crawl_rate_limit_rps=requested), custom)
+    assert options.crawl_rate_limit_rps == effective
