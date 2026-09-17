@@ -1,6 +1,10 @@
+import multiprocessing
+import os
 import shutil
+import subprocess
 import tempfile
 import time
+from contextlib import suppress
 from pathlib import Path
 
 import pytest
@@ -69,6 +73,52 @@ async def test_worker_directory_that_cannot_be_removed_yet_is_removed_later(monk
         assert not Path(directory).exists()
     finally:
         await pool.close()
+
+
+async def test_failed_group_kill_still_stops_the_worker(monkeypatch):
+    def fail(*args, **kwargs):
+        raise subprocess.TimeoutExpired("taskkill", 5) if os.name == "nt" else PermissionError()
+
+    pool = WorkerPool(1)
+    await pool.run(temp_directory, (), Deadline(5))
+    slot = next(iter(pool.slots))
+    monkeypatch.setattr(workers.subprocess, "run", fail)
+    monkeypatch.setattr(workers.os, "killpg", fail, raising=False)
+    try:
+        with pytest.raises(CrawlError, match="deadline"):
+            await pool.run(stuck_converter, (), Deadline(0.2))
+        assert not multiprocessing.active_children()
+    finally:
+        monkeypatch.undo()
+        for child in multiprocessing.active_children():
+            child.kill()
+        slot.receiver.close()  # releases an exchange thread that would otherwise block forever
+        await pool.close()
+
+
+async def test_close_stops_every_worker_even_if_one_cleanup_fails(monkeypatch):
+    real_stop = workers._Slot.stop
+    stopped = []
+
+    def stop(slot):
+        stopped.append(slot)
+        real_stop(slot)
+        if len(stopped) == 1:
+            raise OSError("simulated cleanup failure")
+
+    pool = WorkerPool(2)
+    for _ in range(2):  # the idle queue hands out the second, still unstarted slot
+        await pool.run(temp_directory, (), Deadline(5))
+    assert len(pool.slots) == 2
+    monkeypatch.setattr(workers._Slot, "stop", stop)
+    try:
+        await pool.close()
+        assert len(stopped) == 2 and not pool.slots
+    finally:
+        monkeypatch.undo()
+        for slot in list(pool.slots):
+            with suppress(Exception):
+                slot.stop()
 
 
 async def test_failed_worker_cleanup_keeps_original_error_and_is_not_reused(monkeypatch):

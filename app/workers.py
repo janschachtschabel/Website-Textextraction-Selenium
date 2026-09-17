@@ -73,13 +73,17 @@ class _Slot:
         return self.receiver.recv()
 
     def stop(self):
-        if os.name == "posix":
-            with suppress(ProcessLookupError):
-                os.killpg(self.process.pid, signal.SIGKILL)
-        elif self.process.is_alive():
-            subprocess.run(
-                ["taskkill", "/PID", str(self.process.pid), "/T", "/F"], capture_output=True, timeout=5, check=False
-            )
+        try:
+            if os.name == "posix":
+                with suppress(ProcessLookupError):
+                    os.killpg(self.process.pid, signal.SIGKILL)
+            elif self.process.is_alive():
+                subprocess.run(
+                    ["taskkill", "/PID", str(self.process.pid), "/T", "/F"], capture_output=True, timeout=5, check=False
+                )
+        except (OSError, subprocess.SubprocessError) as exc:
+            # Still stop the worker and close its pipes: an open receiver keeps the exchange thread blocked.
+            logger.warning("Worker process group kill failed ({})", type(exc).__name__)
         if self.process.is_alive():
             self.process.kill()
         self.process.join(timeout=1)
@@ -90,6 +94,14 @@ class _Slot:
         self.directory.cleanup()
         if os.path.exists(self.directory.name):
             _leftover_directories.add(self.directory.name)
+
+
+def _stop(slot):
+    """Stop a worker; a cleanup failure is logged and never replaces the caller's outcome."""
+    try:
+        slot.stop()
+    except Exception as exc:
+        logger.error("Worker cleanup failed ({})", type(exc).__name__)
 
 
 class WorkerPool:
@@ -127,10 +139,7 @@ class WorkerPool:
                 # Never hand a stopped worker back to the idle queue, even if cleanup fails.
                 dead, slot = slot, None
                 self.slots.discard(dead)
-                try:
-                    dead.stop()
-                except Exception as exc:
-                    logger.error("Worker cleanup failed ({})", type(exc).__name__)
+                _stop(dead)
             raise
         finally:
             if acquired and not self.closed:
@@ -144,7 +153,7 @@ class WorkerPool:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         for slot in self.slots:
-            slot.stop()
+            _stop(slot)
         self.slots.clear()
         _remove_leftover_directories()
 
