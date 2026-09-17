@@ -238,7 +238,11 @@ throughput or speedup claim is implied by the regression tests.
 
 [Colab notebook](Website_Textextraction_Selenium.ipynb) provides an optional demo
 using the same package metadata. Public tunnel setup requires a secret API key.
-[nginx example](deploy/nginx.conf) includes the maximum request deadline.
+The [nginx example](deploy/nginx.conf) terminates TLS, redirects plain HTTP,
+allows the maximum request deadline and limits inbound requests with the zones in
+[nginx-ratelimit.conf](deploy/nginx-ratelimit.conf). The application itself does not
+rate-limit inbound requests. Both guards listen on loopback without authentication,
+so run the service on a host you do not share with untrusted local users.
 
 ## License
 
