@@ -4,7 +4,7 @@ import asyncio
 
 from selenium.common.exceptions import WebDriverException
 
-from .browser_readiness import navigation_error, navigation_status, net_error_code, wait_for_content
+from .browser_readiness import driver_navigation_error, navigation_error, navigation_status, wait_for_content
 from .config import settings
 from .deadline import Deadline
 from .egress_proxy import EgressProxy
@@ -79,7 +79,8 @@ def selenium_fetch(url, options, proxy_url, expires_at):
         frame = main_frame(driver, events)
         status, mime = navigation_status(events, frame["id"])
         warnings = []
-        if web_url(frame["url"]):
+        page = web_url(frame["url"])
+        if page:
             driver.execute_script(CAPTURE_MATH)
             snapshot = driver.execute_script(
                 "const html = document.documentElement.outerHTML; "
@@ -98,10 +99,13 @@ def selenium_fetch(url, options, proxy_url, expires_at):
             warnings.append("Page content did not settle within the auto-wait limit; returning the current state")
         if truncated:
             warnings.append("Rendered HTML truncated at max_bytes")
-        screenshot = driver.get_screenshot_as_base64() if options.screenshot and not options.anonymize else None
+        screenshot = (
+            driver.get_screenshot_as_base64() if page and options.screenshot and not options.anonymize else None
+        )
+        final_url = driver.current_url
         return FetchResult(
             data[: options.max_bytes],
-            driver.current_url if web_url(driver.current_url) else url,
+            final_url if web_url(final_url) else url,
             status,
             "text/html; charset=utf-8" if mime in {None, "text/html", "application/xhtml+xml"} else mime,
             "selenium",
@@ -112,7 +116,7 @@ def selenium_fetch(url, options, proxy_url, expires_at):
         )
     except WebDriverException as exc:
         # ChromeDriver raises for other failures, e.g. "unknown error: net::ERR_TUNNEL_CONNECTION_FAILED".
-        raise navigation_failed(net_error_code(exc.msg)) from exc
+        raise navigation_failed(driver_navigation_error(exc.msg)) from exc
     finally:
         if driver is not None:
             try:

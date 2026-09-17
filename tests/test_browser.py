@@ -191,6 +191,9 @@ class NavigationDriver:
             return {"html": "<html><head></head><body></body></html>", "truncated": False}
         return {"text": "Displayed text", "busy": False, "ready": True, "math": True}
 
+    def get_screenshot_as_base64(self):
+        return "iVBORw0KGgo="
+
     def quit(self):
         pass
 
@@ -240,11 +243,12 @@ def test_chrome_page_for_an_empty_error_response_keeps_the_status_without_its_te
     driver = NavigationDriver("chrome-error://chromewebdata/", entries)
     driver.current_url = "https://example.com/missing"
     monkeypatch.setattr(js_fetcher, "create_driver", lambda *args: driver)
-    options = resolve_options(CrawlRequest(url="https://example.com/missing", mode="js"))
+    options = resolve_options(CrawlRequest(url="https://example.com/missing", mode="js", screenshot=True))
     result = js_fetcher.selenium_fetch(
         "https://example.com/missing", options, "http://127.0.0.1:1234", Deadline(5).expires_at
     )
     assert (result.status_code, result.data, result.warnings) == (404, b"", [])
+    assert result.screenshot_base64 is None  # a picture of Chrome's error page is not content either
     assert result.final_url == "https://example.com/missing"
 
 
@@ -264,6 +268,32 @@ def test_chromedriver_navigation_error_names_the_network_error(monkeypatch):
     with pytest.raises(CrawlError) as error:
         js_fetcher.selenium_fetch("https://example.com", options, "http://127.0.0.1:1234", Deadline(5).expires_at)
     assert str(error.value) == "Selenium navigation failed (net::ERR_TUNNEL_CONNECTION_FAILED)"
+
+
+def test_page_script_error_text_never_becomes_a_network_error_code(monkeypatch):
+    from selenium.common.exceptions import JavascriptException
+
+    from app import js_fetcher
+    from app.deadline import Deadline
+    from app.results import CrawlError
+
+    class ThrowingPage(NavigationDriver):
+        def execute_script(self, script, *args):
+            raise JavascriptException("javascript error: net::ERR_WRITTEN_BY_THE_PAGE")
+
+    entries = [
+        log_entry(
+            "Network.responseReceived",
+            frameId="main",
+            type="Document",
+            response={"status": 200, "mimeType": "text/html"},
+        )
+    ]
+    monkeypatch.setattr(js_fetcher, "create_driver", lambda *args: ThrowingPage("https://example.com/", entries))
+    options = resolve_options(CrawlRequest(url="https://example.com", mode="js", js_auto_wait=True))
+    with pytest.raises(CrawlError) as error:
+        js_fetcher.selenium_fetch("https://example.com", options, "http://127.0.0.1:1234", Deadline(5).expires_at)
+    assert str(error.value) == "Selenium navigation failed"
 
 
 def test_download_is_reported_without_waiting_for_a_page(monkeypatch):

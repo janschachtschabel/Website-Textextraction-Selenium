@@ -84,13 +84,16 @@ def navigation_error(entries, frame_id):
                 error = params.get("errorText")
         except (ValueError, KeyError, TypeError):
             continue
-    return net_error_code(error)
+    return error if isinstance(error, str) and _NET_ERROR.fullmatch(error) else None
 
 
-def net_error_code(text):
-    """Chrome's fixed network error code in `text`; public messages never carry other text."""
-    match = _NET_ERROR.search(text) if isinstance(text, str) else None
-    return match.group(0) if match else None
+def driver_navigation_error(message):
+    """Code from ChromeDriver's "unknown error: net::ERR_..." navigation message.
+
+    Other WebDriver messages can quote page-controlled text (script errors, alerts); they never match.
+    """
+    prefix, _, code = (message or "").partition("\n")[0].strip().partition("unknown error: ")
+    return code if not prefix and _NET_ERROR.fullmatch(code) else None
 
 
 def wait_for_content(driver, options, deadline: Deadline) -> bool:
