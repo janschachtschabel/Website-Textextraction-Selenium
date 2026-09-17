@@ -1,4 +1,5 @@
 import socket
+import time
 from dataclasses import replace
 
 import diskcache
@@ -133,6 +134,13 @@ def test_blocked_status_short_success_and_feed_link_do_not_start_browser():
 )
 def test_challenge_text_is_detected_after_a_heading_or_site_name(text, blocked):
     assert blocked_content(text, 200) is blocked
+
+
+def test_challenge_check_stays_fast_on_whitespace_only_text():
+    started = time.perf_counter()
+    for _ in range(5):
+        assert not blocked_content(" \n" * 499, 200)
+    assert (time.perf_counter() - started) / 5 < 0.01
 
 
 def test_empty_spa_shell_needs_browser_but_cookie_words_do_not(article_html):

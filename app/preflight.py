@@ -7,15 +7,19 @@ from bs4 import BeautifulSoup
 from .markup import decode_text
 from .results import ConversionResult, FetchResult
 
-# The phrase opens the text or the line after one other line, such as the site name or a page heading.
 _CHALLENGE = re.compile(
-    r"\A\s*(?:.*$\s*)?(?:#{1,6}\s*)?(just a moment|checking your browser|verifying you are human|attention required)",
-    re.I | re.M,
+    r"\s*(?:#{1,6}\s*)?(just a moment|checking your browser|verifying you are human|attention required)", re.I
 )
 
 
 def blocked_content(text: str, status: int | None) -> bool:
-    return bool((status is not None and status >= 400) or (len(text) < 1000 and _CHALLENGE.search(text)))
+    if status is not None and status >= 400:
+        return True
+    if len(text) >= 1000:
+        return False
+    # The phrase opens the first or second non-empty line; the first can be the site name or a heading.
+    lines = [line for line in text.splitlines() if line.strip()]
+    return any(_CHALLENGE.match(line) for line in lines[:2])
 
 
 def needs_browser(fetched: FetchResult, converted: ConversionResult) -> bool:
