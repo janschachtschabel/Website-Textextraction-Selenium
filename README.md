@@ -84,8 +84,11 @@ extraction. Check `success`, `status_code` and `extraction_status`. Operational
 failures use a sanitized API error: 400 for prohibited/invalid destinations,
 422 for invalid options, 502 for fetch failures, 503 for queue/unavailable PII,
 and 504 for an expired deadline. Browser navigation errors, such as an untrusted
-certificate, are 502 fetch failures that name Chrome's `net::ERR_*` code; Chrome's
-own error page is never returned as content. Failed/partial results are not cached.
+certificate or a failed HTTPS connection, are 502 fetch failures that name Chrome's
+`net::ERR_*` code. For plain HTTP targets, the network guard answers a connection
+it rejects or cannot open with status 403 or 502; both fetch paths report that status.
+Chrome's own pages (error pages, the blank page a download leaves) are never
+returned as content or screenshot. Failed/partial results are not cached.
 
 ## Batch requests and deadlines
 
@@ -115,9 +118,9 @@ Omitted/null configurable options inherit `.env` values. Explicit `false` and `0
 remain overrides. `.env.example` lists all supported settings.
 
 - `html_converter`: `trafilatura` (default), `markitdown`, or `bs4`. Trafilatura
-  output starts with the page's first `<h1>`, also when it sits outside the main
-  content. For overview pages with little running text, `markitdown` keeps more,
-  including navigation.
+  output starts with the page's first visible `<h1>`, also when it sits outside
+  the main content, unless it already starts with a heading. For overview pages
+  with little running text, `markitdown` keeps more, including navigation.
 - `trafilatura_clean_markdown=false`: Trafilatura's raw text extraction.
 - `max_bytes`: bounds decoded HTTP output and rendered HTML; truncation is explicit.
   Compressed HTTP input is decoded with a bounded output allocation. For Chrome,
