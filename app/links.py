@@ -1,49 +1,11 @@
+"""Classified outbound links for the response; runs inside conversion workers."""
+
 from __future__ import annotations
 
-import random
 import re
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
-
-
-def is_ssrf_url(url: str) -> bool:
-    """Compatibility helper; actual connections additionally use the egress guard."""
-    from .results import CrawlError
-    from .security import resolve_target
-
-    try:
-        resolve_target(url)
-        return False
-    except CrawlError:
-        return True
-
-
-def detect_error_page(text: str, status_code: int | None, *, check_thin: bool = False) -> bool:
-    """Short valid pages are useful; empty results and explicit blocks are failures."""
-    from .preflight import blocked_content
-
-    return blocked_content(text, status_code) or (check_thin and not text.strip())
-
-
-def extract_links_from_html(html: str, base_url: str) -> list[str]:
-    soup = BeautifulSoup(html, "lxml")
-    links: list[str] = []
-    for tag in soup.find_all("a", href=True):
-        href = tag["href"].strip()
-        if not href:
-            continue
-        absolute = urljoin(base_url, href)
-        links.append(absolute)
-    # Deduplicate while preserving order
-    seen = set()
-    unique = []
-    for link in links:
-        if link not in seen:
-            seen.add(link)
-            unique.append(link)
-    return unique
-
 
 # Heuristics for link classification
 SOCIAL_DOMAINS = {
@@ -263,63 +225,3 @@ def extract_links_detailed_from_html(html: str, base_url: str) -> list[dict]:
             }
         )
     return items
-
-
-MIME_TO_EXT = {
-    "text/html": ".html",
-    "application/xhtml+xml": ".html",
-    "application/pdf": ".pdf",
-    "application/msword": ".doc",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
-    "application/vnd.ms-powerpoint": ".ppt",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
-    "application/vnd.ms-excel": ".xls",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
-    "text/plain": ".txt",
-    "application/json": ".json",
-    "image/png": ".png",
-    "image/jpeg": ".jpg",
-    "image/gif": ".gif",
-    "image/webp": ".webp",
-}
-
-
-def guess_extension(content_type: str | None, default: str = ".bin") -> str:
-    if not content_type:
-        return default
-    ctype = content_type.split(";")[0].strip().lower()
-    return MIME_TO_EXT.get(ctype, default)
-
-
-def normalize_proxy(proxy: str | None) -> str | None:
-    """Return a valid proxy URL or None.
-
-    - Treat "string" or "" or whitespace as None (OpenAPI default noise)
-    - Require a scheme in {http, https, socks5, socks5h, socks4}; otherwise None
-    """
-    if not proxy:
-        return None
-    s = proxy.strip()
-    if not s or s.lower() == "string":
-        return None
-    parsed = urlparse(s)
-    if parsed.scheme.lower() in {"http", "https", "socks5", "socks5h", "socks4"}:
-        return s
-    return None
-
-
-UA_POOL = [
-    # Modern desktop Chrome variants
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
-    # A Firefox variant
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
-]
-
-
-def pick_user_agent(default_ua: str | None = None) -> str:
-    pool = UA_POOL.copy()
-    if default_ua and default_ua not in pool:
-        pool.append(default_ua)
-    return random.choice(pool)

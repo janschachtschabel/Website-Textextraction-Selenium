@@ -5,9 +5,9 @@ from .deadline import Deadline
 
 def prepare_document(fetched, options, expires_at):
     from .converter import convert_document
+    from .links import extract_links_detailed_from_html
     from .markup import decode_text
     from .preflight import needs_browser
-    from .utils import extract_links_detailed_from_html
 
     converted = convert_document(
         fetched.data,

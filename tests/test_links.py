@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.utils import extract_links_detailed_from_html
+from app.links import extract_links_detailed_from_html
 
 BASE = "https://www.example.com/lessons/optics"
 
