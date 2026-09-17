@@ -249,3 +249,16 @@ async def test_unexpected_adapter_failure_stays_isolated_to_its_batch_item(api, 
     assert response.status_code == 200
     assert response.json()["failed"] == 1 and response.json()["succeeded"] == 1
     assert "sensitive upstream content" not in response.text
+
+
+async def test_batch_pipeline_runs_without_the_http_layer(api):
+    from app.schemas import BatchCrawlRequest, resolve_options
+
+    _, state, resources = api
+    urls = ["https://example.com/a", "https://example.com/b", "https://example.com/blocked"]
+    options = resolve_options(BatchCrawlRequest(urls=urls), resources.config)
+    response = await resources.service.crawl_batch(urls, options, max_concurrency=2)
+    assert (response.total, response.succeeded, response.failed) == (3, 2, 1)
+    assert [item.url for item in response.results] == urls
+    assert response.results[-1].error == "Extraction blocked"
+    assert state["peak"] <= 2

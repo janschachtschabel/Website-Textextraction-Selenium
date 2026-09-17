@@ -1,8 +1,6 @@
 """FastAPI boundary: authentication, schemas and endpoint adaptation."""
 
-import asyncio
 import secrets
-import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Security
@@ -12,19 +10,16 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from . import __version__
 from .body_limit import BodySizeLimit
 from .config import settings
-from .deadline import Deadline
 from .logging_setup import setup_logging
 from .resources import Resources
 from .results import CrawlError
 from .schemas import (
-    BatchCrawlItemResult,
     BatchCrawlRequest,
     BatchCrawlResponse,
     CrawlRequest,
     CrawlResponse,
     resolve_options,
 )
-from .service import failure_reason
 
 
 def create_app(config=settings, resources=None):
@@ -88,41 +83,8 @@ def create_app(config=settings, resources=None):
 
     @application.post("/crawl/batch", response_model=BatchCrawlResponse, dependencies=[Security(check_auth)])
     async def batch(request: BatchCrawlRequest):
-        started = time.monotonic()
-        options = resolve_options(request, config)
-        # All deadlines start at batch admission, including time behind max_concurrency.
-        expires_at = time.monotonic() + options.timeout_ms / 1000
-        semaphore = asyncio.Semaphore(request.max_concurrency)
-
-        async def one(url):
-            deadline = Deadline.at(expires_at)
-            acquired = False
-            try:
-                await deadline.run(semaphore.acquire())
-                acquired = True
-                result = await application.state.resources.service.crawl(str(url), options, deadline)
-                return BatchCrawlItemResult(
-                    url=str(url),
-                    success=result.success,
-                    result=result,
-                    error=None if result.success else failure_reason(result),
-                )
-            except CrawlError as exc:
-                if not acquired:
-                    await application.state.resources.metrics.record(time.monotonic() - started, False)
-                return BatchCrawlItemResult(url=str(url), success=False, error=str(exc))
-            finally:
-                if acquired:
-                    semaphore.release()
-
-        results = await asyncio.gather(*(one(url) for url in request.urls))
-        succeeded = sum(item.success for item in results)
-        return BatchCrawlResponse(
-            total=len(results),
-            succeeded=succeeded,
-            failed=len(results) - succeeded,
-            results=results,
-            elapsed_ms=round((time.monotonic() - started) * 1000),
+        return await application.state.resources.service.crawl_batch(
+            [str(url) for url in request.urls], resolve_options(request, config), request.max_concurrency
         )
 
     return application

@@ -11,7 +11,7 @@ from .deadline import Deadline
 from .preflight import blocked_content
 from .result_cache import make_cache_key
 from .results import CrawlError
-from .schemas import CrawlResponse
+from .schemas import BatchCrawlItemResult, BatchCrawlResponse, CrawlResponse
 from .worker_tasks import anonymize_document, prepare_document
 
 
@@ -63,6 +63,45 @@ class CrawlService:
                 bool(result and result.cached),
                 bool(result and result.coalesced),
             )
+
+    async def crawl_batch(self, urls, options, max_concurrency) -> BatchCrawlResponse:
+        started = time.monotonic()
+        # All deadlines start at batch admission, including time behind max_concurrency.
+        expires_at = started + options.timeout_ms / 1000
+        semaphore = asyncio.Semaphore(max_concurrency)
+        results = await asyncio.gather(
+            *(self._batch_item(url, options, expires_at, semaphore, started) for url in urls)
+        )
+        succeeded = sum(item.success for item in results)
+        return BatchCrawlResponse(
+            total=len(results),
+            succeeded=succeeded,
+            failed=len(results) - succeeded,
+            results=results,
+            elapsed_ms=round((time.monotonic() - started) * 1000),
+        )
+
+    async def _batch_item(self, url, options, expires_at, semaphore, started):
+        deadline = Deadline.at(expires_at)
+        acquired = False
+        try:
+            await deadline.run(semaphore.acquire())
+            acquired = True
+            result = await self.crawl(url, options, deadline)
+            return BatchCrawlItemResult(
+                url=url,
+                success=result.success,
+                result=result,
+                error=None if result.success else failure_reason(result),
+            )
+        except CrawlError as exc:
+            if not acquired:
+                # crawl() records the attempt itself; a queue failure never reaches it.
+                await self.resources.metrics.record(time.monotonic() - started, False)
+            return BatchCrawlItemResult(url=url, success=False, error=str(exc))
+        finally:
+            if acquired:
+                semaphore.release()
 
     def _log_failure(self, url, options, started, reason, status, extraction=None, level="WARNING"):
         # Host only: paths and query strings can carry tokens or personal data.
