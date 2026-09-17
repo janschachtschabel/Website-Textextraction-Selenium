@@ -101,7 +101,7 @@ DOWNLOAD_EXTS = {
 _SKIP_SCHEMES = frozenset({"javascript:", "data:", "blob:", "vbscript:"})
 
 _RE_LEGAL = re.compile(
-    r"/(impressum|datenschutz(erkl[äa]rung)?|privacy([\-_]policy)?|"
+    r"/(impressum|datenschutz(erkl[äa]e?rung)?|privacy([\-_]policy)?|"
     r"agb|terms([\-_]of[\-_](service|use))?|"
     r"cookie(s|[\-_]policy|[\-_]settings|einstellungen)?|"
     r"nutzungsbedingungen|haftungsausschluss|disclaimer|imprint|"
