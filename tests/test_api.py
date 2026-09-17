@@ -178,6 +178,7 @@ async def test_unsettled_rendered_page_is_returned_but_not_a_cached_success(api)
         ({"urls": ["https://example.com/long"], "mode": "fast", "max_bytes": 1024}, "Extraction truncated"),
         ({"urls": ["https://example.com/spinner"], "mode": "js"}, "Extraction incomplete"),
         ({"urls": ["https://example.com/choices"], "mode": "fast"}, "Upstream status 300"),
+        ({"urls": ["https://example.com/unobserved"], "mode": "js"}, "Upstream status unknown"),
     ],
 )
 async def test_batch_error_names_why_an_extracted_page_is_not_a_success(api, payload, error):
@@ -187,9 +188,10 @@ async def test_batch_error_names_why_an_extracted_page_is_not_a_success(api, pay
 
     class Browser:
         async def fetch(self, url, options, deadline):
-            return FetchResult(
-                b"<main>Rendered lesson content.</main>", url, 200, "text/html", "selenium", settled=False
-            )
+            unobserved = url.endswith("/unobserved")  # otherwise a page that never settled
+            status = None if unobserved else 200
+            body = b"<main>Rendered lesson content.</main>"
+            return FetchResult(body, url, status, "text/html", "selenium", settled=unobserved)
 
     resources.browser = Browser()
     item = (await client.post("/crawl/batch", json=payload)).json()["results"][0]

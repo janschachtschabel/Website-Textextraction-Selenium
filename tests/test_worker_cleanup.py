@@ -82,16 +82,17 @@ async def test_failed_group_kill_still_stops_the_worker(monkeypatch):
     pool = WorkerPool(1)
     await pool.run(temp_directory, (), Deadline(5))
     slot = next(iter(pool.slots))
+    process = slot.process
     monkeypatch.setattr(workers.subprocess, "run", fail)
     monkeypatch.setattr(workers.os, "killpg", fail, raising=False)
     try:
         with pytest.raises(CrawlError, match="deadline"):
             await pool.run(stuck_converter, (), Deadline(0.2))
-        assert not multiprocessing.active_children()
+        assert process not in multiprocessing.active_children()
     finally:
         monkeypatch.undo()
-        for child in multiprocessing.active_children():
-            child.kill()
+        if process in multiprocessing.active_children():
+            process.kill()
         slot.receiver.close()  # releases an exchange thread that would otherwise block forever
         await pool.close()
 

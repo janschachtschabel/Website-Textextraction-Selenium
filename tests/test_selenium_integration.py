@@ -185,7 +185,6 @@ def self_signed_server_context(directory):
 
 
 async def test_certificate_error_page_is_a_failure_not_content(browser, monkeypatch, tmp_path):
-    pytest.importorskip("cryptography")
     fetch, _, _ = browser
 
     async def page(reader, writer):
