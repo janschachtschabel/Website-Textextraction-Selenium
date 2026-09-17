@@ -29,7 +29,9 @@ key is also exported in your shell. `/docs`, `/redoc` and `/openapi.json` docume
 the request and response schema and are served only while no key is configured.
 `/health` is public and reports process readiness even while all workers are busy.
 `/stats` uses the same Bearer authentication as the crawl endpoints. Request bodies
-above `MAX_REQUEST_BYTES` (1 MiB) are answered with 413 before authentication.
+above `MAX_REQUEST_BYTES` (1 MiB) are answered with 413 before authentication and the
+connection is closed, so a client that is still uploading can see the reset instead of
+the response body.
 
 Every failed crawl is logged as one line with host, mode, upstream status, extraction
 status and elapsed time - never the path or query string. `LOG_JSON=true` emits the
