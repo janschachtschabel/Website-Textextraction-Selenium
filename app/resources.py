@@ -89,8 +89,8 @@ class Resources:
                 max_connections=self.config.http_max_connections,
             )
             self.stack.push_async_callback(self.http.close)
-            self.browser_pool = WorkerPool(self.config.selenium_max_pool_size)
-            self.conversion_pool = WorkerPool(self.config.conversion_workers)
+            self.browser_pool = WorkerPool(self.config.selenium_max_pool_size, self.config.worker_max_jobs)
+            self.conversion_pool = WorkerPool(self.config.conversion_workers, self.config.worker_max_jobs)
             self.stack.push_async_callback(self.browser_pool.close)
             self.stack.push_async_callback(self.conversion_pool.close)
             self.browser = self.browser or BrowserFetcher(self.browser_pool, self.rate, self.config)

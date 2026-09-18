@@ -45,6 +45,7 @@ class Settings:
     chrome_binary: str | None = os.getenv("CHROME_BINARY") or None
     chromedriver_path: str | None = os.getenv("CHROMEDRIVER_PATH") or None
     conversion_workers: int = int(os.getenv("CONVERSION_WORKERS", "2"))
+    worker_max_jobs: int = int(os.getenv("WORKER_MAX_JOBS", "100"))
     http_max_connections: int = int(os.getenv("HTTP_MAX_CONNECTIONS", "16"))
     max_concurrent_requests: int = int(os.getenv("MAX_CONCURRENT_REQUESTS", "8"))
     max_queue_size: int = int(os.getenv("MAX_QUEUE_SIZE", "50"))
@@ -68,6 +69,7 @@ class Settings:
         for name in (
             "selenium_max_pool_size",
             "conversion_workers",
+            "worker_max_jobs",
             "http_max_connections",
             "max_concurrent_requests",
             "queue_timeout_seconds",

@@ -262,3 +262,13 @@ async def test_batch_pipeline_runs_without_the_http_layer(api):
     assert [item.url for item in response.results] == urls
     assert response.results[-1].error == "Extraction blocked"
     assert state["peak"] <= 2
+
+
+async def test_both_worker_pools_use_the_configured_job_budget(api):
+    _, _, resources = api
+    assert resources.browser_pool.max_jobs == resources.conversion_pool.max_jobs == resources.config.worker_max_jobs
+
+
+def test_worker_job_budget_must_be_positive():
+    with pytest.raises(ValueError, match="worker_max_jobs"):
+        replace(settings, host="127.0.0.1", worker_max_jobs=0)

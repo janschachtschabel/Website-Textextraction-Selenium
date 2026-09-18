@@ -185,7 +185,9 @@ end-to-end. Keep network-level egress restrictions around production browser
 workers as an additional boundary for untrusted web content.
 
 Default capacity per Uvicorn process: 8 active URLs, 50 waiting URLs, 16 HTTP
-connections, 2 browser workers and 2 conversion workers. No Chrome/NLP warmup runs
+connections, 2 browser workers and 2 conversion workers. Each worker process is
+replaced after `WORKER_MAX_JOBS` (100) successful jobs, which bounds the memory that
+lxml, MarkItDown and Chrome accumulate. No Chrome/NLP warmup runs
 at startup. Both Selenium strategies share the same browser budget. Increasing
 `UVICORN_WORKERS` multiplies these capacities; start with the default of 1.
 

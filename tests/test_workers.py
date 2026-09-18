@@ -39,6 +39,21 @@ async def test_workers_are_lazy_reused_and_hung_process_is_replaced():
     assert pool.stats()["started"] == 0
 
 
+async def test_worker_is_retired_after_its_job_budget():
+    pool = WorkerPool(1, max_jobs=2)
+    try:
+        first, _ = await pool.run(identity, ("one",), Deadline(5))
+        second, _ = await pool.run(identity, ("two",), Deadline(5))
+        assert pool.stats()["started"] == 0  # retired right after its second job
+        third, value = await pool.run(identity, ("three",), Deadline(5))
+        assert first == second != third and value == "three"
+        if os.name == "posix":
+            with pytest.raises(ProcessLookupError):
+                os.kill(first, 0)
+    finally:
+        await pool.close()
+
+
 async def test_cancelled_worker_is_stopped_and_slot_released():
     pool = WorkerPool(1)
     try:

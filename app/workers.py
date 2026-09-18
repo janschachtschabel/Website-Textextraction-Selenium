@@ -1,4 +1,5 @@
-"""Bounded reusable processes, terminated on timeout or client cancellation.
+"""Bounded reusable processes, terminated on timeout or client cancellation and
+retired after a fixed number of jobs.
 
 Browser and conversion pools have separate budgets. Browser sessions themselves
 are fresh per job; Python imports and optional NLP models remain warm.
@@ -67,6 +68,7 @@ class _Slot:
         self.process.start()
         incoming.close()
         outgoing.close()
+        self.jobs = 0
 
     def exchange(self, function, args):
         self.sender.send((function, args))
@@ -105,11 +107,12 @@ def _stop(slot):
 
 
 class WorkerPool:
-    def __init__(self, size: int):
+    def __init__(self, size: int, max_jobs: int = 100):
         self.idle = asyncio.Queue()
         for _ in range(size):
             self.idle.put_nowait(None)
         self.size = size
+        self.max_jobs = max_jobs
         self.slots = set()
         self.running = set()
         self.closed = False
@@ -133,6 +136,12 @@ class WorkerPool:
                 raise CrawlError("Worker exited unexpectedly", 503) from exc
             if reply[0] == "error":
                 raise CrawlError(reply[1], reply[2])
+            slot.jobs += 1
+            if slot.jobs >= self.max_jobs:
+                # lxml, MarkItDown and Chrome keep memory that only a new process gives back.
+                retired, slot = slot, None  # the idle queue gets None: the next job starts a worker
+                self.slots.discard(retired)
+                await asyncio.to_thread(_stop, retired)
             return reply[1]
         except BaseException:
             if slot is not None:
