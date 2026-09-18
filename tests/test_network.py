@@ -169,3 +169,26 @@ async def test_requests_accept_html_and_send_a_language_only_when_set():
     assert all(headers["accept"].startswith("text/html,") for headers in seen)
     assert "accept-language" not in seen[0]
     assert seen[1]["accept-language"] == "de,en;q=0.8"
+
+
+async def test_validators_are_only_sent_to_the_url_that_issued_them():
+    seen = []
+
+    def upstream(request):
+        seen.append((request.url.path, request.headers.get("if-none-match")))
+        if request.url.path == "/old":
+            return httpx.Response(301, headers={"location": "https://other.example/lesson"})
+        if request.headers.get("if-none-match") == '"v1"':
+            return httpx.Response(304)
+        return httpx.Response(200, content=b"<p>x</p>", headers={"content-type": "text/html", "etag": '"v1"'})
+
+    fetcher = HTTPFetcher(transport=httpx.MockTransport(upstream), validate=lambda url: None)
+    try:
+        first = await fetcher.fetch("https://example.com/old", options(), Deadline(5))
+        assert first.validators == {"etag": '"v1"', "url": "https://other.example/lesson"}
+        again = await fetcher.fetch("https://example.com/old", options(), Deadline(5), first.validators)
+    finally:
+        await fetcher.close()
+    assert again.status_code == 304
+    # The redirecting origin never sees the other site's ETag.
+    assert seen[-2:] == [("/old", None), ("/lesson", '"v1"')]

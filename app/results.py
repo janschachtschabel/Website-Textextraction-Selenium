@@ -25,7 +25,7 @@ class FetchResult:
     screenshot_base64: str | None = None
     warnings: list[str] = field(default_factory=list)
     settled: bool = True  # False: browser auto-wait gave up, the content may be incomplete
-    validators: dict[str, str] = field(default_factory=dict)  # etag / last_modified of an HTTP response
+    validators: dict[str, str] = field(default_factory=dict)  # etag / last_modified and the URL that sent them
 
 
 class CrawlError(Exception):

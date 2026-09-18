@@ -20,13 +20,15 @@ ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
 VALIDATORS = {"etag": ("etag", "If-None-Match"), "last_modified": ("last-modified", "If-Modified-Since")}
 
 
-def response_validators(headers) -> dict[str, str]:
+def response_validators(headers, url: str) -> dict[str, str]:
     # Echoed back in a later request: only short printable values, or revalidation would fail forever.
-    return {
+    found = {
         name: headers[header]
         for name, (header, _) in VALIDATORS.items()
         if header in headers and len(headers[header]) <= 512 and all(32 <= ord(c) <= 126 for c in headers[header])
     }
+    # Bound to the issuing URL: across a redirect another site must not receive them (ETags can track).
+    return {**found, "url": url} if found else {}
 
 
 def retry_delay(value: str | None, attempt: int) -> float:
@@ -100,9 +102,10 @@ class HTTPFetcher:
             headers = {"User-Agent": options.user_agent, "Accept": ACCEPT, "Accept-Encoding": "gzip, deflate"}
             if options.accept_language:
                 headers["Accept-Language"] = options.accept_language
-            for name, (_, conditional) in VALIDATORS.items():
-                if name in validators:
-                    headers[conditional] = validators[name]
+            if validators.get("url") == url:
+                for name, (_, conditional) in VALIDATORS.items():
+                    if name in validators:
+                        headers[conditional] = validators[name]
             request = httpx.Request(
                 "GET",
                 url,
@@ -121,7 +124,7 @@ class HTTPFetcher:
                     response.status_code,
                     response.headers.get("content-type"),
                     truncated=truncated,
-                    validators=response_validators(response.headers),
+                    validators=response_validators(response.headers, str(request.url)),
                 )
                 if truncated:
                     result.warnings.append("Response truncated at max_bytes")
