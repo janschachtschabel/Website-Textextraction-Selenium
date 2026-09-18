@@ -33,6 +33,12 @@ above `MAX_REQUEST_BYTES` (1 MiB) are answered with 413 before authentication an
 connection is closed, so a client that is still uploading can see the reset instead of
 the response body.
 
+`INBOUND_RATE_LIMIT_RPS` (off by default) limits crawl requests after authentication:
+every URL, also inside a batch, costs one token from a bucket of
+`INBOUND_RATE_LIMIT_BURST` (20) tokens that refills at the configured rate. Excess
+requests get 429 with `Retry-After`. The bucket is per process and shared by all
+clients; failed authentication never consumes tokens.
+
 Every failed crawl is logged as one line with host, mode, upstream status, extraction
 status and elapsed time - never the path or query string. `LOG_JSON=true` emits the
 same fields as JSON and, like the readable sink, without exception variable values.
@@ -247,8 +253,8 @@ throughput or speedup claim is implied by the regression tests.
 using the same package metadata. Public tunnel setup requires a secret API key.
 The [nginx example](deploy/nginx.conf) terminates TLS, redirects plain HTTP,
 allows the maximum request deadline and limits inbound requests with the zones in
-[nginx-ratelimit.conf](deploy/nginx-ratelimit.conf). The application itself does not
-rate-limit inbound requests. Both guards listen on loopback without authentication,
+[nginx-ratelimit.conf](deploy/nginx-ratelimit.conf) per client IP, which the application's
+own inbound limit cannot distinguish. Both guards listen on loopback without authentication,
 so run the service on a host you do not share with untrusted local users.
 
 ## License

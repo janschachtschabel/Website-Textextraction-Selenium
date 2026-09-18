@@ -64,6 +64,8 @@ class Settings:
     presidio_en_model: str = os.getenv("PRESIDIO_EN_MODEL", "en_core_web_lg")
     uvicorn_workers: int = int(os.getenv("UVICORN_WORKERS", "1"))
     max_request_bytes: int = int(os.getenv("MAX_REQUEST_BYTES", str(1024 * 1024)))
+    inbound_rate_limit_rps: float = float(os.getenv("INBOUND_RATE_LIMIT_RPS", "0"))
+    inbound_rate_limit_burst: int = int(os.getenv("INBOUND_RATE_LIMIT_BURST", "20"))
 
     def __post_init__(self):
         for name in (
@@ -102,6 +104,8 @@ class Settings:
                 raise ValueError(f"Invalid {name}")
         if not 1024 <= self.max_request_bytes <= 100 * 1024 * 1024:
             raise ValueError("MAX_REQUEST_BYTES must be 1024..104857600")
+        if self.inbound_rate_limit_rps < 0 or self.inbound_rate_limit_burst < 1:
+            raise ValueError("INBOUND_RATE_LIMIT_RPS must be >= 0 and INBOUND_RATE_LIMIT_BURST >= 1")
         # An unauthenticated service on a reachable address is a crawling proxy for anyone who finds it.
         if not self.api_key and not _is_loopback(self.host):
             raise ValueError("Set API_KEY before binding HOST to a non-loopback address")

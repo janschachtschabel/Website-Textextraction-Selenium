@@ -1,5 +1,6 @@
 """FastAPI boundary: authentication, schemas and endpoint adaptation."""
 
+import math
 import secrets
 from contextlib import asynccontextmanager
 
@@ -10,6 +11,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from . import __version__
 from .body_limit import BodySizeLimit
 from .config import settings
+from .inbound_limit import InboundLimit
 from .logging_setup import setup_logging
 from .resources import Resources
 from .results import CrawlError
@@ -41,6 +43,17 @@ def create_app(config=settings, resources=None):
     )
     application.add_middleware(BodySizeLimit, max_bytes=config.max_request_bytes)
     bearer = HTTPBearer(auto_error=False)
+    limit = (
+        InboundLimit(config.inbound_rate_limit_rps, config.inbound_rate_limit_burst)
+        if config.inbound_rate_limit_rps
+        else None
+    )
+
+    def admit(urls: int):
+        # Runs after authentication, so unauthenticated traffic cannot drain the bucket.
+        wait = limit.take(urls) if limit else 0
+        if wait:
+            raise HTTPException(429, "Too many crawl requests", headers={"Retry-After": str(math.ceil(wait))})
 
     def check_auth(credentials: HTTPAuthorizationCredentials | None = Security(bearer)):
         if config.api_key and (
@@ -79,10 +92,12 @@ def create_app(config=settings, resources=None):
 
     @application.post("/crawl", response_model=CrawlResponse, dependencies=[Security(check_auth)])
     async def crawl(request: CrawlRequest):
+        admit(1)
         return await application.state.resources.service.crawl(str(request.url), resolve_options(request, config))
 
     @application.post("/crawl/batch", response_model=BatchCrawlResponse, dependencies=[Security(check_auth)])
     async def batch(request: BatchCrawlRequest):
+        admit(len(request.urls))
         return await application.state.resources.service.crawl_batch(
             [str(url) for url in request.urls], resolve_options(request, config), request.max_concurrency
         )
