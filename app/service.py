@@ -162,12 +162,12 @@ class CrawlService:
             fetched = await resources.browser.fetch(url, options, deadline)
         else:
             fetched = await resources.fetch_http(url, options, deadline)
-        converted, use_browser, links = await resources.conversion_pool.run(
+        converted, use_browser, links, metadata = await resources.conversion_pool.run(
             prepare_document, (fetched, options, deadline.expires_at), deadline
         )
         if use_browser:  # prepare_document only proposes this in auto mode
             fetched = await resources.browser.fetch(fetched.final_url, options, deadline)
-            converted, _, links = await resources.conversion_pool.run(
+            converted, _, links, metadata = await resources.conversion_pool.run(
                 prepare_document, (fetched, options, deadline.expires_at), deadline
             )
         blocked = blocked_content(converted.markdown, fetched.status_code)
@@ -177,10 +177,10 @@ class CrawlService:
             converted.markdown, anon = await resources.conversion_pool.run(
                 anonymize_document, (converted.markdown, options.anonymize_language), deadline
             )
-            links = None
+            links = metadata = None
             fetched.screenshot_base64 = None
-            if options.extract_links or options.screenshot:
-                warnings.append("Links and screenshots suppressed for anonymized responses")
+            if options.extract_links or options.extract_metadata or options.screenshot:
+                warnings.append("Links, metadata and screenshots are suppressed for anonymized responses")
         if options.screenshot and fetched.engine == "http":
             warnings.append("Screenshot unavailable on the HTTP path; use mode=js to require rendering")
         success = bool(
@@ -210,6 +210,7 @@ class CrawlService:
             truncated=fetched.truncated,
             warnings=warnings,
             links=links,
+            metadata=metadata,
             screenshot_base64=fetched.screenshot_base64,
             anonymization=anon,
             elapsed_ms=0,

@@ -7,6 +7,7 @@ def prepare_document(fetched, options, expires_at):
     from .converter import convert_document
     from .links import extract_links_detailed_from_html
     from .markup import decode_text
+    from .page_metadata import page_metadata
     from .preflight import needs_browser
 
     converted = convert_document(
@@ -18,12 +19,20 @@ def prepare_document(fetched, options, expires_at):
         media_conversion_policy=options.media_conversion_policy,
         timeout_seconds=Deadline.at(expires_at).remaining(),
     )
-    links = None
-    if options.extract_links and not options.anonymize and "html" in (fetched.content_type or ""):
-        links = extract_links_detailed_from_html(decode_text(fetched.data, fetched.content_type), fetched.final_url)
+    links = metadata = None
+    if (
+        not options.anonymize
+        and "html" in (fetched.content_type or "")
+        and (options.extract_links or options.extract_metadata)
+    ):
+        html = decode_text(fetched.data, fetched.content_type)
+        if options.extract_links:
+            links = extract_links_detailed_from_html(html, fetched.final_url)
+        if options.extract_metadata:
+            metadata = page_metadata(html, fetched.final_url)
     # Routing parses the document again, and only auto mode can act on the answer.
     use_browser = options.mode == "auto" and needs_browser(fetched, converted)
-    return converted, use_browser, links
+    return converted, use_browser, links, metadata
 
 
 def anonymize_document(text, language):

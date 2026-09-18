@@ -209,11 +209,18 @@ def pii_backend(text, language):
 async def test_only_redacted_output_is_cached_and_parallel_representations_are_suppressed(api, monkeypatch):
     client, state, _ = api
     monkeypatch.setattr("app.service.anonymize_document", pii_backend)
-    payload = {"url": "https://example.com/pii", "anonymize": True, "extract_links": True, "screenshot": True}
+    payload = {
+        "url": "https://example.com/pii",
+        "anonymize": True,
+        "extract_links": True,
+        "extract_metadata": True,  # an author name is personal data
+        "screenshot": True,
+    }
     for cached in (False, True):
         result = (await client.post("/crawl", json=payload)).json()
         assert result["cached"] is cached and result["markdown"] == "[redacted]"
-        assert result["links"] is None and result["screenshot_base64"] is None
+        assert result["links"] is None and result["screenshot_base64"] is None and result["metadata"] is None
+        assert any("metadata" in warning for warning in result["warnings"])
         assert result["anonymization"]["entity_count"] == 1
     assert state["calls"] == 1
 
@@ -272,3 +279,14 @@ async def test_both_worker_pools_use_the_configured_job_budget(api):
 def test_worker_job_budget_must_be_positive():
     with pytest.raises(ValueError, match="worker_max_jobs"):
         replace(settings, host="127.0.0.1", worker_max_jobs=0)
+
+
+async def test_metadata_is_returned_only_when_requested(api):
+    client, _, _ = api
+    plain = (await client.post("/crawl", json={"url": "https://example.com/plain"})).json()
+    assert plain["success"] and plain["metadata"] is None
+    described = (
+        await client.post("/crawl", json={"url": "https://example.com/described", "extract_metadata": True})
+    ).json()
+    assert described["metadata"]["title"] == "Optics"
+    assert described["metadata"]["canonical_url"] == "https://example.com/described"

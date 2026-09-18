@@ -34,6 +34,7 @@ class CrawlOptions(BaseModel):
     trafilatura_clean_markdown: bool | None = None
     media_conversion_policy: Literal["skip", "metadata", "full", "none"] | None = None
     extract_links: bool = False
+    extract_metadata: bool = False
     screenshot: bool = False
     anonymize: bool = False
     anonymize_language: Literal["de", "en"] = "de"
@@ -111,6 +112,16 @@ class LinkInfo(BaseModel):
     ] = "other"
 
 
+class PageMetadata(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    author: str | None = None
+    date: str | None = Field(None, description="Publication date as YYYY-MM-DD")
+    site_name: str | None = Field(None, description="Declared site name, else the host name")
+    canonical_url: str | None = Field(None, description="Declared canonical URL, else the final URL")
+    language: str | None = Field(None, description="The <html lang> attribute")
+
+
 class AnonymizationResult(BaseModel):
     entities_found: list[str] = Field(default_factory=list)
     entity_count: int = 0
@@ -135,6 +146,7 @@ class CrawlResponse(BaseModel):
     truncated: bool = False
     warnings: list[str] = Field(default_factory=list)
     links: list[LinkInfo] | None = None
+    metadata: PageMetadata | None = None
     screenshot_base64: str | None = None
     anonymization: AnonymizationResult | None = None
     elapsed_ms: int

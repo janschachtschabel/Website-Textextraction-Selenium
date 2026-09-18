@@ -99,6 +99,7 @@ Important result fields:
 | `success` | Usable, complete (non-truncated, settled) text from a successful upstream response |
 | `truncated` / `warnings` | Explicit size limits, fallbacks and other limitations |
 | `cached` / `coalesced` | Shared result-cache hit / shared in-progress extraction |
+| `links` / `metadata` | Classified links and page metadata, when requested |
 | `elapsed_ms` | Duration of this call, including waiting |
 
 An HTTP 200 **from this API** can contain an upstream error or an unsuccessful
@@ -162,9 +163,14 @@ remain overrides. `.env.example` lists all supported settings.
 - `user_agent`, `headless`, `allow_insecure_ssl` and `proxy` apply to each request.
 - `screenshot=false` by default. A requested screenshot is available only on the
   browser path; choose `mode=js` when a screenshot is required.
+- `extract_metadata=true`: `metadata` with title, description, author, publication
+  date, site name, canonical URL and `<html lang>` of an HTML page, as the page declares
+  them (Trafilatura). An undeclared canonical URL falls back to the final URL, an
+  undeclared site name to the host. Off by default: it parses the page once more,
+  about 15-60 ms per document.
 - `anonymize=true`: local Presidio redacts Markdown. Missing/failed models produce
-  an error with no page text, never an unredacted fallback. Links and screenshots
-  are suppressed for these responses. Source URL metadata remains URL metadata;
+  an error with no page text, never an unredacted fallback. Links, metadata and
+  screenshots are suppressed for these responses. Source URL metadata remains URL metadata;
   automated PII detection is not a guarantee that every identifier is recognized.
 - Media `skip`/`none` return `extraction_status=skipped` with empty Markdown.
   `metadata` uses local `ffprobe` with a bounded runtime. See migration notes for

@@ -81,6 +81,6 @@ def test_browser_routing_is_computed_only_for_auto_mode(monkeypatch, mode, route
         "text/html",
     )
     options = resolve_options(CrawlRequest(url="https://example.com/app", mode=mode), settings)
-    _, use_browser, _ = prepare_document(fetched, options, time.monotonic() + 30)
+    _, use_browser, *_ = prepare_document(fetched, options, time.monotonic() + 30)
     assert bool(checks) is routed
     assert use_browser is routed
