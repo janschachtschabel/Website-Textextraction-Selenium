@@ -30,6 +30,7 @@ dependencies = [
     "loguru>=0.7.3,<1",
     "diskcache>=5.6.0,<6",
     "prometheus-client>=0.22,<1",
+    "protego>=0.4,<1",
 ]
 
 [project.optional-dependencies]

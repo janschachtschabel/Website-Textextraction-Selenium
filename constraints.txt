@@ -84,6 +84,7 @@ platformdirs==4.11.9
 pluggy==1.6.0
 prometheus-client==0.26.0
 propcache==0.5.4
+protego==0.6.2
 protobuf==7.36.1
 py-serializable==2.1.0
 pycparser==3.0

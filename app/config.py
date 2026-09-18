@@ -61,6 +61,7 @@ class Settings:
     media_conversion_policy: str = os.getenv("MEDIA_CONVERSION_POLICY", "skip").lower()
     allow_insecure_ssl: bool = _bool("ALLOW_INSECURE_SSL", False)
     ssrf_protection: bool = _bool("SSRF_PROTECTION", True)
+    respect_robots_txt: bool = _bool("RESPECT_ROBOTS_TXT", False)
     html_converter: str = os.getenv("HTML_CONVERTER", "trafilatura").lower()
     trafilatura_clean_markdown: bool = _bool("TRAFILATURA_CLEAN_MARKDOWN", True)
     result_cache_ttl: int = int(os.getenv("RESULT_CACHE_TTL", "300"))

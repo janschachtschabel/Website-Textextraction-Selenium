@@ -11,6 +11,7 @@ from .deadline import Deadline
 from .preflight import blocked_content
 from .result_cache import make_cache_key
 from .results import CrawlError
+from .robots import RobotsPolicy
 from .schemas import BatchCrawlItemResult, BatchCrawlResponse, CrawlResponse
 from .worker_tasks import anonymize_document, prepare_document
 
@@ -36,6 +37,7 @@ class CrawlService:
             self.config.max_concurrent_requests, self.config.max_queue_size, self.config.queue_timeout_seconds
         )
         self.inflight = {}
+        self.robots = RobotsPolicy(resources)
 
     async def crawl(self, url, options, deadline=None):
         started = time.monotonic()
@@ -157,6 +159,8 @@ class CrawlService:
 
     async def _extract(self, url, options, deadline):
         resources = self.resources
+        if options.respect_robots_txt and not await self.robots.allowed(url, options, deadline):
+            raise CrawlError("Disallowed by robots.txt", 403)
         if options.mode == "js":
             await deadline.run(asyncio.to_thread(resources.validate, url))
             fetched = await resources.browser.fetch(url, options, deadline)

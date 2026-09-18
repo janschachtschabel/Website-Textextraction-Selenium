@@ -110,7 +110,8 @@ Important result fields:
 
 An HTTP 200 **from this API** can contain an upstream error or an unsuccessful
 extraction. Check `success`, `status_code` and `extraction_status`. Operational
-failures use a sanitized API error: 400 for prohibited/invalid destinations,
+failures use a sanitized API error: 400 for prohibited/invalid destinations, 403 when
+the opt-in robots.txt check disallows the URL,
 422 for invalid options, 502 for fetch failures, 503 for queue/unavailable PII,
 and 504 for an expired deadline. Browser navigation errors, such as an untrusted
 certificate or a failed HTTPS connection, are 502 fetch failures that name Chrome's
@@ -169,6 +170,12 @@ remain overrides. `.env.example` lists all supported settings.
 - `user_agent`, `headless`, `allow_insecure_ssl` and `proxy` apply to each request.
   The default user agent is `WebsiteTextExtraction/<version>` plus the project URL as
   contact; sites with a bot policy, such as Wikimedia, block crawlers without one.
+- `respect_robots_txt` (default `RESPECT_ROBOTS_TXT`, off) checks the requested URL
+  against the site's robots.txt (RFC 9309, longest match wins, groups by the user
+  agent's product token) and answers 403 when it is disallowed. robots.txt is fetched
+  through the same guarded path and cached per origin for an hour; 4xx means no
+  restrictions, 5xx or an unreachable server a complete disallow for five minutes.
+  Redirect targets are not checked again.
 - `accept_language` (default `DEFAULT_ACCEPT_LANGUAGE`, empty) selects the language
   variant of multilingual sites, for example `de,en;q=0.8`. HTTP requests send it as
   given; Chrome receives the language list and sets its own q-values. HTTP requests

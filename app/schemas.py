@@ -42,6 +42,7 @@ class CrawlOptions(BaseModel):
     anonymize: bool = False
     anonymize_language: Literal["de", "en"] = "de"
     crawl_rate_limit_rps: float | None = Field(None, ge=0, le=100)
+    respect_robots_txt: bool | None = None
     force_refresh: bool = False
 
     @field_validator("proxy")
@@ -96,6 +97,7 @@ def resolve_options(request: CrawlOptions, config: Settings = settings) -> Crawl
         "media_conversion_policy": config.media_conversion_policy,
         "allow_insecure_ssl": config.allow_insecure_ssl,
         "crawl_rate_limit_rps": config.default_domain_rate_limit_rps,
+        "respect_robots_txt": config.respect_robots_txt,
     }
     values.update({name: value for name, value in defaults.items() if values[name] is None})
     # A politeness limit the operator sets is a ceiling: a client may crawl a domain more
