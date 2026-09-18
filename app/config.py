@@ -44,7 +44,7 @@ class Settings:
     default_retries: int = int(os.getenv("DEFAULT_RETRIES", "1"))
     default_headless: bool = _bool("DEFAULT_HEADLESS", True)
     default_max_bytes: int = int(os.getenv("DEFAULT_MAX_BYTES", str(10 * 1024 * 1024)))
-    default_user_agent: str = os.getenv("DEFAULT_USER_AGENT", DEFAULT_USER_AGENT)
+    default_user_agent: str = os.getenv("DEFAULT_USER_AGENT") or DEFAULT_USER_AGENT  # empty: the default
     default_accept_language: str = os.getenv("DEFAULT_ACCEPT_LANGUAGE", "")
     default_js_auto_wait: bool = _bool("DEFAULT_JS_AUTO_WAIT", True)
     default_js_strategy: str = os.getenv("DEFAULT_JS_STRATEGY", "speed")

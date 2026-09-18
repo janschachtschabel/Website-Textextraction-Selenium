@@ -54,6 +54,20 @@ def test_default_user_agent_names_the_version_and_a_contact_url(monkeypatch):
     )
 
 
+def test_an_empty_user_agent_setting_falls_back_to_the_default(monkeypatch):
+    monkeypatch.delenv("HOST", raising=False)
+    monkeypatch.setenv("DEFAULT_USER_AGENT", "")
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)
+    try:
+        module = importlib.reload(config_module)
+        agent = module.Settings(api_key=None).default_user_agent
+        expected = module.DEFAULT_USER_AGENT
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config_module)
+    assert agent == expected
+
+
 async def _request(app, method, path, **kwargs):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         return await client.request(method, path, **kwargs)
