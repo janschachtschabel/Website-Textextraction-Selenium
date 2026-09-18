@@ -29,7 +29,10 @@ def prepare_document(fetched, options, expires_at):
         if options.extract_links:
             links = extract_links_detailed_from_html(html, fetched.final_url)
         if options.extract_metadata:
-            metadata = page_metadata(html, fetched.final_url)
+            try:
+                metadata = page_metadata(html, fetched.final_url)
+            except Exception as exc:  # third-party heuristics on page-controlled text; the text stands
+                converted.warnings.append(f"Page metadata unavailable ({type(exc).__name__})")
     # Routing parses the document again, and only auto mode can act on the answer.
     use_browser = options.mode == "auto" and needs_browser(fetched, converted)
     return converted, use_browser, links, metadata
