@@ -67,6 +67,7 @@ class Settings:
     result_cache_ttl: int = int(os.getenv("RESULT_CACHE_TTL", "300"))
     result_cache_max_size: int = int(os.getenv("RESULT_CACHE_MAX_SIZE", "200"))
     result_cache_dir: str = os.getenv("RESULT_CACHE_DIR", "")
+    revalidation_ttl: int = int(os.getenv("REVALIDATION_TTL", "86400"))
     global_rate_limit_rps: float = float(os.getenv("GLOBAL_RATE_LIMIT_RPS", "0"))
     default_domain_rate_limit_rps: float = float(os.getenv("DEFAULT_DOMAIN_RATE_LIMIT_RPS", "0"))
     presidio_de_model: str = os.getenv("PRESIDIO_DE_MODEL", "de_core_news_lg")
@@ -97,6 +98,7 @@ class Settings:
             min(
                 self.max_queue_size,
                 self.result_cache_ttl,
+                self.revalidation_ttl,
                 self.global_rate_limit_rps,
                 self.default_domain_rate_limit_rps,
             )

@@ -17,6 +17,16 @@ from .security import resolve_target
 RETRY_STATUSES = {429, 500, 502, 503, 504}
 # Transport-level requests carry no client defaults: without Accept some servers answer 406.
 ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+VALIDATORS = {"etag": ("etag", "If-None-Match"), "last_modified": ("last-modified", "If-Modified-Since")}
+
+
+def response_validators(headers) -> dict[str, str]:
+    # Echoed back in a later request: only short printable values, or revalidation would fail forever.
+    return {
+        name: headers[header]
+        for name, (header, _) in VALIDATORS.items()
+        if header in headers and len(headers[header]) <= 512 and all(32 <= ord(c) <= 126 for c in headers[header])
+    }
 
 
 def retry_delay(value: str | None, attempt: int) -> float:
@@ -57,13 +67,14 @@ class HTTPFetcher:
         for transport in set(self.transports.values()):
             await transport.aclose()
 
-    async def fetch(self, url: str, options: CrawlOptions, deadline: Deadline) -> FetchResult:
-        return await deadline.run(self._fetch(url, options, deadline))
+    async def fetch(self, url: str, options: CrawlOptions, deadline: Deadline, validators=None) -> FetchResult:
+        """Conditional when ``validators`` (from an earlier FetchResult) are given: 304 means unchanged."""
+        return await deadline.run(self._fetch(url, options, deadline, validators or {}))
 
-    async def _fetch(self, url, options, deadline):
+    async def _fetch(self, url, options, deadline, validators):
         for attempt in range(options.retries + 1):
             try:
-                result, after = await self._redirects(url, options, deadline)
+                result, after = await self._redirects(url, options, deadline, validators)
                 if result.status_code not in RETRY_STATUSES or attempt == options.retries:
                     return result
             except httpx.TimeoutException as exc:
@@ -76,7 +87,7 @@ class HTTPFetcher:
             await deadline.run(asyncio.sleep(retry_delay(after, attempt)))
         raise AssertionError("Unreachable retry state")
 
-    async def _redirects(self, url, options, deadline):
+    async def _redirects(self, url, options, deadline, validators):
         visited = set()
         for _ in range(11):
             if url in visited:
@@ -89,6 +100,9 @@ class HTTPFetcher:
             headers = {"User-Agent": options.user_agent, "Accept": ACCEPT, "Accept-Encoding": "gzip, deflate"}
             if options.accept_language:
                 headers["Accept-Language"] = options.accept_language
+            for name, (_, conditional) in VALIDATORS.items():
+                if name in validators:
+                    headers[conditional] = validators[name]
             request = httpx.Request(
                 "GET",
                 url,
@@ -107,6 +121,7 @@ class HTTPFetcher:
                     response.status_code,
                     response.headers.get("content-type"),
                     truncated=truncated,
+                    validators=response_validators(response.headers),
                 )
                 if truncated:
                     result.warnings.append("Response truncated at max_bytes")

@@ -105,9 +105,9 @@ class Resources:
         self.ready = False
         await self.stack.aclose()
 
-    async def fetch_http(self, url, options, deadline):
+    async def fetch_http(self, url, options, deadline, validators=None):
         if not options.proxy:
-            return await self.http.fetch(url, options, deadline)
+            return await self.http.fetch(url, options, deadline, validators)
         async with EgressProxy(protection=self.config.ssrf_protection, upstream=options.proxy) as guard:
             fetcher = HTTPFetcher(
                 guard.url,
@@ -116,6 +116,6 @@ class Resources:
                 max_connections=self.config.http_max_connections,
             )
             try:
-                return await fetcher.fetch(url, options, deadline)
+                return await fetcher.fetch(url, options, deadline, validators)
             finally:
                 await fetcher.close()

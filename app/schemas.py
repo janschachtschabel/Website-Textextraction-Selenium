@@ -158,6 +158,7 @@ class CrawlResponse(BaseModel):
     elapsed_ms: int
     cached: bool = False
     coalesced: bool = False
+    revalidated: bool = Field(False, description="Cached result confirmed unchanged by the upstream (304)")
 
 
 class BatchCrawlItemResult(BaseModel):

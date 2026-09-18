@@ -105,6 +105,7 @@ Important result fields:
 | `success` | Usable, complete (non-truncated, settled) text from a successful upstream response |
 | `truncated` / `warnings` | Explicit size limits, fallbacks and other limitations |
 | `cached` / `coalesced` | Shared result-cache hit / shared in-progress extraction |
+| `revalidated` | Cached result the upstream confirmed unchanged with 304 |
 | `links` / `metadata` | Classified links and page metadata, when requested |
 | `elapsed_ms` | Duration of this call, including waiting |
 
@@ -231,6 +232,13 @@ filesystem. Identical in-flight requests coalesce within each Uvicorn process;
 this is not a distributed coalescing service. Cache keys include effective options,
 media policy, model identity and a format version. `force_refresh=true` bypasses
 lookup and refreshes the successful result. TTL 0 disables result caching.
+
+A successful HTTP result is also kept with its `ETag`/`Last-Modified` for
+`REVALIDATION_TTL` (one day). When the fresh entry has expired, the next crawl sends
+`If-None-Match`/`If-Modified-Since`; a 304 returns the stored result with
+`revalidated: true` and neither downloads nor converts the page again. Browser results
+are not revalidated, because a rendered page can change while the document stays the
+same. `force_refresh=true` always fetches unconditionally.
 
 Both stores hold JSON, never pickled objects, and live in `results-json-v1` and
 `state-json-v1` under `RESULT_CACHE_DIR`. On POSIX the service refuses to start when

@@ -15,6 +15,8 @@ from .robots import RobotsPolicy
 from .schemas import BatchCrawlItemResult, BatchCrawlResponse, CrawlResponse
 from .worker_tasks import anonymize_document, prepare_document
 
+STALE = "stale:"  # result plus ETag/Last-Modified, kept for REVALIDATION_TTL after the fresh entry
+
 
 def failure_reason(result: CrawlResponse) -> str:
     """Why success is false. Mirrors the rule in CrawlService._extract; change both together."""
@@ -134,12 +136,13 @@ class CrawlService:
         future.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)
         self.inflight[key] = future
         try:
+            stale = None
+            if self.config.result_cache_ttl and self.config.revalidation_ttl and not options.force_refresh:
+                stale = await resources.io(resources.cache.get, STALE + key)
             async with self.capacity.slot(deadline):
-                result = await self._extract(url, options, deadline)
+                result, validators = await self._extract(url, options, deadline, stale)
             if result.success and self.config.result_cache_ttl:
-                await resources.io(
-                    resources.cache.set, key, result.model_dump(mode="json"), expire=self.config.result_cache_ttl
-                )
+                await self._store(key, result, validators)
             future.set_result(result)
             return result
         except BaseException as exc:
@@ -157,7 +160,17 @@ class CrawlService:
         finally:
             self.inflight.pop(key, None)
 
-    async def _extract(self, url, options, deadline):
+    async def _store(self, key, result, validators):
+        resources = self.resources
+        stored = result.model_copy(update={"cached": False, "coalesced": False, "revalidated": False})
+        stored = stored.model_dump(mode="json")
+        await resources.io(resources.cache.set, key, stored, expire=self.config.result_cache_ttl)
+        if validators and self.config.revalidation_ttl:
+            entry = {"validators": validators, "result": stored}
+            await resources.io(resources.cache.set, STALE + key, entry, expire=self.config.revalidation_ttl)
+
+    async def _extract(self, url, options, deadline, stale=None):
+        """The response and, for an HTTP-engine result, the upstream validators to revalidate it with."""
         resources = self.resources
         if options.respect_robots_txt and not await self.robots.allowed(url, options, deadline):
             raise CrawlError("Disallowed by robots.txt", 403)
@@ -165,7 +178,10 @@ class CrawlService:
             await deadline.run(asyncio.to_thread(resources.validate, url))
             fetched = await resources.browser.fetch(url, options, deadline)
         else:
-            fetched = await resources.fetch_http(url, options, deadline)
+            fetched = await resources.fetch_http(url, options, deadline, stale["validators"] if stale else None)
+            if stale and fetched.status_code == 304:
+                result = CrawlResponse.model_validate(stale["result"])
+                return result.model_copy(update={"cached": True, "revalidated": True}), stale["validators"]
         converted, use_browser, links, metadata = await resources.conversion_pool.run(
             prepare_document, (fetched, options, deadline.expires_at), deadline
         )
@@ -196,7 +212,7 @@ class CrawlService:
             and fetched.status_code is not None
             and 200 <= fetched.status_code < 300
         )
-        return CrawlResponse(
+        response = CrawlResponse(
             request_mode=options.mode,
             fetch_engine=fetched.engine,
             converter=converted.converter,
@@ -219,3 +235,5 @@ class CrawlService:
             anonymization=anon,
             elapsed_ms=0,
         )
+        # A rendered result can change although the document did not, so only HTTP results revalidate.
+        return response, fetched.validators if fetched.engine == "http" else {}
