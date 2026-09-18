@@ -3,6 +3,31 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## 0.6.0 — 2026-09-18
+
+### Added
+
+- `GET /metrics` in Prometheus text format (Bearer-protected): cumulative request, cache-hit
+  and coalescing counters, a latency histogram of fresh successful extractions, and gauges
+  for readiness, capacity, worker pools and cache size. New dependency: `prometheus-client`.
+- Background jobs: `POST /jobs` takes a batch body and answers 202 with an ID;
+  `GET /jobs/{id}` reports `queued`, `running`, `done` (with the batch result) or `failed`.
+  For clients such as the Colab tunnel that cannot hold a connection for a long batch.
+  `MAX_ACTIVE_JOBS` (10), `JOB_RESULT_TTL` (1 h).
+- Opt-in robots.txt check (`respect_robots_txt` / `RESPECT_ROBOTS_TXT`), RFC 9309 semantics
+  via `protego`; a disallowed URL answers 403. New dependency: `protego`.
+- Conditional revalidation: an expired HTTP result is revalidated with its ETag/Last-Modified;
+  a 304 returns it with `revalidated: true` without downloading or converting again
+  (`REVALIDATION_TTL`, one day).
+- `accept_language` / `DEFAULT_ACCEPT_LANGUAGE` for the HTTP and browser paths; HTTP requests
+  now always send an `Accept` header.
+
+### Changed
+
+- The default user agent is `WebsiteTextExtraction/<version>` plus the project URL as contact;
+  Wikimedia answered the bare default with 403 "Please respect our robot policy".
+  `.env.example` no longer pins a user agent.
+
 ## 0.5.0 — 2026-09-18
 
 ### Added

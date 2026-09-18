@@ -4,7 +4,9 @@ An HTTP-first FastAPI service that extracts web pages and documents into Markdow
 It uses Trafilatura for main content, MarkItDown for document conversion, and
 Selenium/Chrome when JavaScript rendering is needed. No Playwright dependency.
 
-Version 0.5 adds page metadata, an inbound rate limit and faster browser jobs; 0.4 closed
+Version 0.6 adds Prometheus metrics, background jobs, an optional robots.txt check and
+conditional revalidation; 0.5 added page metadata, an inbound rate limit and faster browser
+jobs; 0.4 closed
 the exposure gaps found in the September 2026 audit; 0.3 corrected
 extraction, privacy, network safety and resource limits. See the
 [changelog](CHANGELOG.md), the [migration notes](docs/migration-0.3.md) and the
