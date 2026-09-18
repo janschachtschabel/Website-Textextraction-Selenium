@@ -45,6 +45,7 @@ class Settings:
     default_headless: bool = _bool("DEFAULT_HEADLESS", True)
     default_max_bytes: int = int(os.getenv("DEFAULT_MAX_BYTES", str(10 * 1024 * 1024)))
     default_user_agent: str = os.getenv("DEFAULT_USER_AGENT", DEFAULT_USER_AGENT)
+    default_accept_language: str = os.getenv("DEFAULT_ACCEPT_LANGUAGE", "")
     default_js_auto_wait: bool = _bool("DEFAULT_JS_AUTO_WAIT", True)
     default_js_strategy: str = os.getenv("DEFAULT_JS_STRATEGY", "speed")
     selenium_max_pool_size: int = int(os.getenv("SELENIUM_MAX_POOL_SIZE", "2"))
@@ -111,6 +112,10 @@ class Settings:
                 raise ValueError(f"Invalid {name}")
         if not 1024 <= self.max_request_bytes <= 100 * 1024 * 1024:
             raise ValueError("MAX_REQUEST_BYTES must be 1024..104857600")
+        if len(self.default_accept_language) > 256 or any(
+            ord(c) < 32 or ord(c) > 126 for c in self.default_accept_language
+        ):
+            raise ValueError("DEFAULT_ACCEPT_LANGUAGE must be printable ASCII, at most 256 characters")
         if self.inbound_rate_limit_rps < 0 or self.inbound_rate_limit_burst < 1:
             raise ValueError("INBOUND_RATE_LIMIT_RPS must be >= 0 and INBOUND_RATE_LIMIT_BURST >= 1")
         # An unauthenticated service on a reachable address is a crawling proxy for anyone who finds it.

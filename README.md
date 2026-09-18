@@ -164,6 +164,10 @@ remain overrides. `.env.example` lists all supported settings.
 - `user_agent`, `headless`, `allow_insecure_ssl` and `proxy` apply to each request.
   The default user agent is `WebsiteTextExtraction/<version>` plus the project URL as
   contact; sites with a bot policy, such as Wikimedia, block crawlers without one.
+- `accept_language` (default `DEFAULT_ACCEPT_LANGUAGE`, empty) selects the language
+  variant of multilingual sites, for example `de,en;q=0.8`. HTTP requests send it as
+  given; Chrome receives the language list and sets its own q-values. HTTP requests
+  always send a browser-like `Accept` header.
 - `screenshot=false` by default. A requested screenshot is available only on the
   browser path; choose `mode=js` when a screenshot is required.
 - `extract_metadata=true`: `metadata` with title, description, author, publication

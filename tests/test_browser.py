@@ -418,3 +418,11 @@ def test_quit_stops_chromedriver_even_when_the_session_cannot_be_ended(monkeypat
         Chrome.quit(driver)  # the caller turns this into a worker restart
     assert driver.service.process.calls == ["terminate", "wait"]
     assert driver.service.stopped_after_exit is True
+
+
+def test_browser_gets_the_language_list_without_q_values():
+    chosen = resolve_options(CrawlRequest(url="https://example.com", accept_language="de-DE, en;q=0.8"))
+    assert "--accept-lang=de-DE,en" in build_options(chosen, "http://127.0.0.1:1234", settings).arguments
+    unset = resolve_options(CrawlRequest(url="https://example.com", accept_language=""))
+    arguments = build_options(unset, "http://127.0.0.1:1234", settings).arguments
+    assert not any(argument.startswith("--accept-lang") for argument in arguments)

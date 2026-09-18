@@ -54,6 +54,10 @@ def build_options(request: CrawlOptions, proxy_url: str, config: Settings = sett
         f"--user-agent={request.user_agent}",
     ]:
         options.add_argument(argument)
+    if request.accept_language:
+        # Chrome takes a plain language list and computes the q-values itself.
+        languages = [part.split(";")[0].strip() for part in request.accept_language.split(",")]
+        options.add_argument("--accept-lang=" + ",".join(language for language in languages if language))
     return options
 
 

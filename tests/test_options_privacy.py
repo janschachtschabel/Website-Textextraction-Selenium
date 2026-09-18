@@ -76,3 +76,24 @@ def test_clients_choose_the_rate_when_the_operator_sets_none(requested, effectiv
     custom = replace(settings, default_domain_rate_limit_rps=0)
     options = resolve_options(CrawlRequest(url="https://example.com", crawl_rate_limit_rps=requested), custom)
     assert options.crawl_rate_limit_rps == effective
+
+
+def test_accept_language_inherits_the_server_default_and_can_be_overridden():
+    custom = replace(settings, default_accept_language="de,en;q=0.8")
+    assert resolve_options(CrawlRequest(url="https://example.com"), custom).accept_language == "de,en;q=0.8"
+    assert (
+        resolve_options(CrawlRequest(url="https://example.com", accept_language="fr"), custom).accept_language == "fr"
+    )
+    unset = replace(settings, default_accept_language="")
+    assert resolve_options(CrawlRequest(url="https://example.com"), unset).accept_language == ""
+
+
+@pytest.mark.parametrize(
+    "value, problem", [("de-DE,en;q=0.8", None), ("de\r\nX-Injected: 1", "printable ASCII"), ("d" * 257, "256")]
+)
+def test_accept_language_must_be_a_short_printable_header_value(value, problem):
+    if problem is None:
+        assert CrawlRequest(url="https://example.com", accept_language=value).accept_language == value
+        return
+    with pytest.raises(ValidationError, match=problem):
+        CrawlRequest(url="https://example.com", accept_language=value)

@@ -252,3 +252,16 @@ def test_real_driver_quits_without_polling_the_stopped_chromedriver(monkeypatch)
     driver = create_driver(resolve_options(CrawlRequest(url="https://example.com")), "http://127.0.0.1:9")
     driver.quit()
     assert driver.service.process.poll() is not None
+
+
+async def test_browser_sends_the_requested_accept_language(browser):
+    fetch, requests, _ = browser
+    await fetch("/inspect", accept_language="de-DE,en;q=0.5")
+    heads = [head.lower() for path, head in requests if path == "/inspect"]
+    languages = [
+        line.split(":", 1)[1].strip()
+        for head in heads
+        for line in head.splitlines()
+        if line.startswith("accept-language:")
+    ]
+    assert languages and languages[-1].startswith("de-de") and "en" in languages[-1]

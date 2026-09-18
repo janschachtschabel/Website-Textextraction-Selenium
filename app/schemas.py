@@ -24,6 +24,9 @@ class CrawlOptions(BaseModel):
     proxy: str | None = Field(None, description="HTTP(S) proxy; numeric CONNECT destinations must be supported")
     allow_insecure_ssl: bool | None = None
     user_agent: str | None = Field(None, min_length=1, max_length=512)
+    accept_language: str | None = Field(
+        None, max_length=256, description="Accept-Language header; empty sends none. Chrome gets the language list"
+    )
     headless: bool | None = None
     js_auto_wait: bool | None = None
     wait_for_selectors: list[str] = Field(
@@ -59,11 +62,11 @@ class CrawlOptions(BaseModel):
             raise ValueError("Invalid proxy port")
         return value
 
-    @field_validator("user_agent")
+    @field_validator("user_agent", "accept_language")
     @classmethod
-    def valid_user_agent(cls, value):
+    def valid_header_value(cls, value):
         if value and any(ord(c) < 32 or ord(c) > 126 for c in value):
-            raise ValueError("User agent must contain printable ASCII")
+            raise ValueError("Header values must be printable ASCII")
         return value
 
 
@@ -86,6 +89,7 @@ def resolve_options(request: CrawlOptions, config: Settings = settings) -> Crawl
         "max_bytes": config.default_max_bytes,
         "headless": config.default_headless,
         "user_agent": config.default_user_agent,
+        "accept_language": config.default_accept_language,
         "js_auto_wait": config.default_js_auto_wait,
         "html_converter": config.html_converter,
         "trafilatura_clean_markdown": config.trafilatura_clean_markdown,

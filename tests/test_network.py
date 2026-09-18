@@ -150,3 +150,22 @@ def test_empty_spa_shell_needs_browser_but_cookie_words_do_not(article_html):
         (article_html + "<p>Cookie consent: accept</p>").encode(), "https://example.com", 200, "text/html"
     )
     assert not needs_browser(fetched, ConversionResult("Useful extracted content. " * 100, "trafilatura", "ok"))
+
+
+async def test_requests_accept_html_and_send_a_language_only_when_set():
+    seen = []
+
+    def upstream(request):
+        seen.append(request.headers)
+        return httpx.Response(200, content=b"<p>x</p>", headers={"content-type": "text/html"})
+
+    fetcher = HTTPFetcher(transport=httpx.MockTransport(upstream), validate=lambda url: None)
+    try:
+        for language in ("", "de,en;q=0.8"):
+            options = resolve_options(CrawlRequest(url="https://example.com", accept_language=language))
+            await fetcher.fetch("https://example.com", options, Deadline(5))
+    finally:
+        await fetcher.close()
+    assert all(headers["accept"].startswith("text/html,") for headers in seen)
+    assert "accept-language" not in seen[0]
+    assert seen[1]["accept-language"] == "de,en;q=0.8"

@@ -15,6 +15,8 @@ from .schemas import CrawlOptions
 from .security import resolve_target
 
 RETRY_STATUSES = {429, 500, 502, 503, 504}
+# Transport-level requests carry no client defaults: without Accept some servers answer 406.
+ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
 
 
 def retry_delay(value: str | None, attempt: int) -> float:
@@ -84,10 +86,13 @@ class HTTPFetcher:
             if self.acquire:
                 await self.acquire(url, options.crawl_rate_limit_rps, deadline)
             remaining = deadline.remaining()
+            headers = {"User-Agent": options.user_agent, "Accept": ACCEPT, "Accept-Encoding": "gzip, deflate"}
+            if options.accept_language:
+                headers["Accept-Language"] = options.accept_language
             request = httpx.Request(
                 "GET",
                 url,
-                headers={"User-Agent": options.user_agent, "Accept-Encoding": "gzip, deflate"},
+                headers=headers,
                 extensions={"timeout": dict.fromkeys(("connect", "read", "write", "pool"), remaining)},
             )
             response = await self.transports[options.allow_insecure_ssl].handle_async_request(request)
