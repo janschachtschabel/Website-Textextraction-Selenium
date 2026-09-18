@@ -29,7 +29,12 @@ refuses to start with a non-loopback host and no key. The examples below assume 
 key is also exported in your shell. `/docs`, `/redoc` and `/openapi.json` document
 the request and response schema and are served only while no key is configured.
 `/health` is public and reports process readiness even while all workers are busy.
-`/stats` uses the same Bearer authentication as the crawl endpoints. Request bodies
+`/stats` uses the same Bearer authentication as the crawl endpoints, and so does
+`/metrics`, which serves Prometheus text format: cumulative request, cache-hit and
+coalescing counters, a latency histogram of fresh successful extractions, and gauges
+for readiness, capacity, worker pools and cache size. The counters live in the shared
+state store, so all Uvicorn workers report one series. Scrape it with
+`authorization: {credentials: <API_KEY>}` in the Prometheus job. Request bodies
 above `MAX_REQUEST_BYTES` (1 MiB) are answered with 413 before authentication and the
 connection is closed, so a client that is still uploading can see the reset instead of
 the response body.

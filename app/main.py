@@ -5,7 +5,7 @@ import secrets
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Security
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from . import __version__
@@ -13,6 +13,7 @@ from .body_limit import BodySizeLimit
 from .config import settings
 from .inbound_limit import InboundLimit
 from .logging_setup import setup_logging
+from .prometheus import CONTENT_TYPE_LATEST, render
 from .resources import Resources
 from .results import CrawlError
 from .schemas import (
@@ -89,6 +90,27 @@ def create_app(config=settings, resources=None):
         result = await active.metrics.stats(count)
         result["capacity"] = active.service.capacity.stats()
         return result
+
+    @application.get("/metrics", dependencies=[Security(check_auth)])
+    async def metrics():
+        active = application.state.resources
+        capacity = active.service.capacity.stats()
+        pools = {"browser": active.browser_pool.stats(), "conversion": active.conversion_pool.stats()}
+        gauges = {
+            "extraction_ready": ("1 while the service accepts work", int(active.ready)),
+            "extraction_active_requests": ("URLs being processed", capacity["active"]),
+            "extraction_waiting_requests": ("URLs waiting for capacity", capacity["waiting"]),
+            "extraction_cache_entries": ("Entries in the result cache", await active.io(len, active.cache)),
+            "extraction_pool_workers": (
+                "Worker processes per pool: limit, started and busy",
+                {
+                    (pool, state): stats[state]
+                    for pool, stats in pools.items()
+                    for state in ("limit", "started", "busy")
+                },
+            ),
+        }
+        return Response(render(await active.metrics.totals(), gauges), media_type=CONTENT_TYPE_LATEST)
 
     @application.post("/crawl", response_model=CrawlResponse, dependencies=[Security(check_auth)])
     async def crawl(request: CrawlRequest):

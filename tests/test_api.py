@@ -111,7 +111,7 @@ async def test_anonymization_failure_returns_no_text_or_parallel_representation(
     assert response.status_code == 503 and state["calls"] == 2
 
 
-async def test_auth_protects_both_crawl_routes_and_stats(tmp_path):
+async def test_auth_protects_both_crawl_routes_stats_and_metrics(tmp_path):
     config = replace(settings, result_cache_dir=str(tmp_path), api_key="fixture-key", host="127.0.0.1")
     app = create_app(config)
     async with app.router.lifespan_context(app):
@@ -121,8 +121,9 @@ async def test_auth_protects_both_crawl_routes_and_stats(tmp_path):
                 ("/crawl/batch", {"urls": ["https://example.com"]}),
             ]:
                 assert (await client.post(path, json=payload)).status_code == 401
-            assert (await client.get("/stats")).status_code == 401
-            assert (await client.get("/stats", headers={"Authorization": "Bearer fixture-key"})).status_code == 200
+            for path in ("/stats", "/metrics"):
+                assert (await client.get(path)).status_code == 401
+                assert (await client.get(path, headers={"Authorization": "Bearer fixture-key"})).status_code == 200
             assert (await client.get("/health")).status_code == 200
             assert (await client.get("/stats", headers={b"Authorization": b"Bearer \xff"})).status_code == 401
 
@@ -290,3 +291,29 @@ async def test_metadata_is_returned_only_when_requested(api):
     ).json()
     assert described["metadata"]["title"] == "Optics"
     assert described["metadata"]["canonical_url"] == "https://example.com/described"
+
+
+async def test_prometheus_metrics_are_cumulative_counters_histogram_and_gauges(api):
+    from prometheus_client.parser import text_string_to_metric_families
+
+    client, _, _ = api
+    await client.post("/crawl", json={"url": "https://example.com/metered"})  # extracted
+    await client.post("/crawl", json={"url": "https://example.com/metered"})  # cache hit
+    await client.post("/crawl", json={"url": "https://example.com/blocked"})  # upstream 429
+    response = await client.get("/metrics")
+    assert response.status_code == 200 and response.headers["content-type"].startswith("text/plain")
+    samples = {
+        (sample.name, tuple(sorted(sample.labels.items()))): sample.value
+        for family in text_string_to_metric_families(response.text)
+        for sample in family.samples
+    }
+    assert samples[("extraction_requests_total", (("outcome", "success"),))] == 2
+    assert samples[("extraction_requests_total", (("outcome", "error"),))] == 1
+    assert samples[("extraction_cache_hits_total", ())] == 1
+    # Latency covers fresh successful extractions only, like /stats.
+    assert samples[("extraction_request_duration_seconds_count", ())] == 1
+    assert samples[("extraction_request_duration_seconds_bucket", (("le", "+Inf"),))] == 1
+    assert samples[("extraction_ready", ())] == 1
+    assert samples[("extraction_cache_entries", ())] == 1
+    assert samples[("extraction_pool_workers", (("pool", "conversion"), ("state", "limit")))] == 1
+    assert ("extraction_active_requests", ()) in samples

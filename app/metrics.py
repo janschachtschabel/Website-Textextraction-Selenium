@@ -4,6 +4,7 @@ import math
 import time
 
 BOUNDS = (0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, math.inf)
+TOTALS = "metrics:total"
 
 
 def _empty():
@@ -17,6 +18,18 @@ def _empty():
         "max": 0.0,
         "histogram": [0] * len(BOUNDS),
     }
+
+
+def _add(row, elapsed, success, cached, coalesced):
+    row["requests"] += 1
+    row["errors"] += not success
+    row["cached"] += cached
+    row["coalesced"] += coalesced
+    if success and not cached and not coalesced:
+        row["n"] += 1
+        row["sum"] += elapsed
+        row["max"] = max(row["max"], elapsed)
+        row["histogram"][next(i for i, upper in enumerate(BOUNDS) if elapsed <= upper)] += 1
 
 
 class Metrics:
@@ -33,17 +46,15 @@ class Metrics:
             bucket = self.store.get(key)
             if not bucket or bucket["minute"] != minute:
                 bucket = {**_empty(), "minute": minute}
-            bucket["requests"] += 1
-            bucket["errors"] += not success
-            bucket["cached"] += cached
-            bucket["coalesced"] += coalesced
-            if success and not cached and not coalesced:
-                bucket["n"] += 1
-                bucket["sum"] += elapsed
-                bucket["max"] = max(bucket["max"], elapsed)
-                index = next(i for i, upper in enumerate(BOUNDS) if elapsed <= upper)
-                bucket["histogram"][index] += 1
+            # Cumulative since the store was created: Prometheus counters must never go down.
+            totals = self.store.get(TOTALS) or _empty()
+            for row in (bucket, totals):
+                _add(row, elapsed, success, cached, coalesced)
             self.store.set(key, bucket, expire=3660)
+            self.store.set(TOTALS, totals)
+
+    async def totals(self):
+        return await self.run_sync(self.store.get, TOTALS) or _empty()
 
     async def stats(self, cache_entries):
         return await self.run_sync(self._stats, cache_entries)
