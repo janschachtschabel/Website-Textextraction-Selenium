@@ -4,7 +4,7 @@ import math
 import secrets
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Security
+from fastapi import FastAPI, HTTPException, Path, Security
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -21,6 +21,8 @@ from .schemas import (
     BatchCrawlResponse,
     CrawlRequest,
     CrawlResponse,
+    JobAccepted,
+    JobStatus,
     resolve_options,
 )
 
@@ -123,6 +125,21 @@ def create_app(config=settings, resources=None):
         return await application.state.resources.service.crawl_batch(
             [str(url) for url in request.urls], resolve_options(request, config), request.max_concurrency
         )
+
+    @application.post("/jobs", status_code=202, response_model=JobAccepted, dependencies=[Security(check_auth)])
+    async def submit_job(request: BatchCrawlRequest):
+        admit(len(request.urls))
+        job_id = await application.state.resources.jobs.submit(
+            [str(url) for url in request.urls], resolve_options(request, config), request.max_concurrency
+        )
+        return JobAccepted(job_id=job_id, status="queued", status_url=f"/jobs/{job_id}")
+
+    @application.get("/jobs/{job_id}", response_model=JobStatus, dependencies=[Security(check_auth)])
+    async def job_status(job_id: str = Path(max_length=64)):
+        record = await application.state.resources.jobs.status(job_id)
+        if record is None:
+            raise HTTPException(404, "Unknown or expired job")
+        return JobStatus(job_id=job_id, **{name: record[name] for name in JobStatus.model_fields if name != "job_id"})
 
     return application
 

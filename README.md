@@ -143,6 +143,27 @@ process pools. On timeout/cancellation, the worker and its child processes are
 terminated and partial temporary files removed before the slot is reused. OS
 cleanup can add a short margin to the response deadline.
 
+### Background jobs
+
+A client that cannot hold a connection open for the whole batch, for example behind
+the Colab tunnel, which ends requests after about 125 seconds, submits the same body
+to `POST /jobs`. It answers 202 with a `job_id` at once; `GET /jobs/{job_id}` returns
+`queued`, `running`, `done` with the batch `result`, or `failed` with an `error`:
+
+```bash
+curl http://127.0.0.1:8000/jobs \
+  -H "Authorization: Bearer $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"urls":["https://example.com","https://www.python.org"],"timeout_ms":300000}'
+curl http://127.0.0.1:8000/jobs/<job_id> -H "Authorization: Bearer $API_KEY"
+```
+
+Job records live in the shared state store for `JOB_RESULT_TTL` (one hour) after they
+finish, so any Uvicorn worker answers the poll. The work runs in the process that
+accepted it; `MAX_ACTIVE_JOBS` (10) bounds unfinished jobs per process (503 beyond).
+A shutdown marks unfinished jobs `failed`, and a job whose process stopped without
+that is reported as lost 30 seconds after its deadline.
+
 ## Options and privacy
 
 Omitted/null configurable options inherit `.env` values. Explicit `false` and `0`

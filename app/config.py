@@ -58,6 +58,8 @@ class Settings:
     max_concurrent_requests: int = int(os.getenv("MAX_CONCURRENT_REQUESTS", "8"))
     max_queue_size: int = int(os.getenv("MAX_QUEUE_SIZE", "50"))
     queue_timeout_seconds: int = int(os.getenv("QUEUE_TIMEOUT_SECONDS", "60"))
+    max_active_jobs: int = int(os.getenv("MAX_ACTIVE_JOBS", "10"))
+    job_result_ttl: int = int(os.getenv("JOB_RESULT_TTL", "3600"))
     media_conversion_policy: str = os.getenv("MEDIA_CONVERSION_POLICY", "skip").lower()
     allow_insecure_ssl: bool = _bool("ALLOW_INSECURE_SSL", False)
     ssrf_protection: bool = _bool("SSRF_PROTECTION", True)
@@ -82,6 +84,8 @@ class Settings:
             "selenium_max_pool_size",
             "conversion_workers",
             "worker_max_jobs",
+            "max_active_jobs",
+            "job_result_ttl",
             "http_max_connections",
             "max_concurrent_requests",
             "queue_timeout_seconds",

@@ -174,3 +174,18 @@ class BatchCrawlResponse(BaseModel):
     failed: int
     results: list[BatchCrawlItemResult]
     elapsed_ms: int
+
+
+class JobAccepted(BaseModel):
+    job_id: str
+    status: Literal["queued"]
+    status_url: str
+
+
+class JobStatus(BaseModel):
+    job_id: str
+    status: Literal["queued", "running", "done", "failed"]
+    submitted_at: str
+    finished_at: str | None = None
+    result: BatchCrawlResponse | None = None
+    error: str | None = None

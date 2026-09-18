@@ -111,7 +111,7 @@ async def test_anonymization_failure_returns_no_text_or_parallel_representation(
     assert response.status_code == 503 and state["calls"] == 2
 
 
-async def test_auth_protects_both_crawl_routes_stats_and_metrics(tmp_path):
+async def test_auth_protects_crawl_job_stats_and_metrics_routes(tmp_path):
     config = replace(settings, result_cache_dir=str(tmp_path), api_key="fixture-key", host="127.0.0.1")
     app = create_app(config)
     async with app.router.lifespan_context(app):
@@ -119,8 +119,10 @@ async def test_auth_protects_both_crawl_routes_stats_and_metrics(tmp_path):
             for path, payload in [
                 ("/crawl", {"url": "https://example.com"}),
                 ("/crawl/batch", {"urls": ["https://example.com"]}),
+                ("/jobs", {"urls": ["https://example.com"]}),
             ]:
                 assert (await client.post(path, json=payload)).status_code == 401
+            assert (await client.get("/jobs/any")).status_code == 401
             for path in ("/stats", "/metrics"):
                 assert (await client.get(path)).status_code == 401
                 assert (await client.get(path, headers={"Authorization": "Bearer fixture-key"})).status_code == 200

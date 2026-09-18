@@ -11,6 +11,7 @@ import diskcache
 
 from .egress_proxy import EgressProxy
 from .http_fetcher import HTTPFetcher
+from .jobs import JobRunner
 from .js_fetcher import BrowserFetcher
 from .metrics import Metrics
 from .rate_limiter import RateLimiter
@@ -95,6 +96,8 @@ class Resources:
             self.stack.push_async_callback(self.conversion_pool.close)
             self.browser = self.browser or BrowserFetcher(self.browser_pool, self.rate, self.config)
             self.service = CrawlService(self)
+            self.jobs = JobRunner(self)
+            self.stack.push_async_callback(self.jobs.close)  # last in, first out: before the pools close
             self.ready = True
             return self
         except BaseException:
