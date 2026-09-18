@@ -3,6 +3,26 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## 0.5.0 — 2026-09-18
+
+### Added
+
+- `extract_metadata=true` returns `metadata` with title, description, author, publication
+  date, site name, canonical URL and `<html lang>`, as the page declares them. Opt-in: it
+  parses the page once more (about 15-60 ms). A failure leaves the text intact and adds a
+  warning; anonymized responses never carry metadata.
+- `INBOUND_RATE_LIMIT_RPS` / `INBOUND_RATE_LIMIT_BURST`: a token bucket in front of the crawl
+  endpoints, applied after authentication. Each URL costs one token; excess requests get
+  429 with `Retry-After`. Off by default; the Colab notebook enables 2 URLs/s.
+- `WORKER_MAX_JOBS` (100): each worker process is replaced after that many successful jobs.
+
+### Changed
+
+- A browser job ends about two seconds sooner: ChromeDriver is stopped directly once the
+  session ends instead of through Selenium's shutdown, which polls in one-second steps.
+  A session that cannot be ended now restarts the worker instead of being ignored.
+- `DEFAULT_USER_AGENT` is `WebsiteTextExtraction/0.5`.
+
 ## 0.4.0 — 2026-09-17
 
 Findings from [the audit of 17 September 2026](docs/audits/2026-09-17-audit.md) are
