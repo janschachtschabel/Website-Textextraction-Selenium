@@ -37,6 +37,23 @@ def test_host_defaults_to_loopback(monkeypatch):
         importlib.reload(config_module)
 
 
+def test_default_user_agent_names_the_version_and_a_contact_url(monkeypatch):
+    from app import __version__
+
+    monkeypatch.delenv("HOST", raising=False)
+    monkeypatch.delenv("DEFAULT_USER_AGENT", raising=False)
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)
+    try:
+        agent = importlib.reload(config_module).Settings(api_key=None).default_user_agent
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config_module)
+    # Sites with a bot policy (Wikimedia answers 403 otherwise) expect a way to reach the operator.
+    assert agent == (
+        f"WebsiteTextExtraction/{__version__} (+https://github.com/janschachtschabel/Website-Textextraction-Selenium)"
+    )
+
+
 async def _request(app, method, path, **kwargs):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         return await client.request(method, path, **kwargs)

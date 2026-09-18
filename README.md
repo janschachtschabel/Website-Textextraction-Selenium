@@ -162,6 +162,8 @@ remain overrides. `.env.example` lists all supported settings.
   and `success=false`. Leave room for page load plus this limit in `timeout_ms`;
   an expired deadline still ends the request with 504.
 - `user_agent`, `headless`, `allow_insecure_ssl` and `proxy` apply to each request.
+  The default user agent is `WebsiteTextExtraction/<version>` plus the project URL as
+  contact; sites with a bot policy, such as Wikimedia, block crawlers without one.
 - `screenshot=false` by default. A requested screenshot is available only on the
   browser path; choose `mode=js` when a screenshot is required.
 - `extract_metadata=true`: `metadata` with title, description, author, publication
