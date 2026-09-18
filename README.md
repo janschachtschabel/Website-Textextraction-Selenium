@@ -177,6 +177,9 @@ remain overrides. `.env.example` lists all supported settings.
   the restrictions on legacy `full` transcription.
 
 Each browser job has a new profile, preventing cross-request cookies/storage.
+Starting Chrome for it costs about 0.6-0.9 s on a desktop machine; ChromeDriver is
+stopped directly once the session ends, because Selenium's own shutdown polls it in
+one-second steps.
 HTTP requests do not retain a cookie jar. Sites requiring persistent logins or
 interactive consent are outside this anonymous extraction contract.
 

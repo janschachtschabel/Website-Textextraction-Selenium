@@ -358,3 +358,63 @@ async def test_transient_browser_failures_still_use_every_attempt(code):
     from app.js_fetcher import navigation_failed
 
     assert await browser_attempts(navigation_failed(code)) == 3
+
+
+class ChromeDriverProcess:
+    def __init__(self):
+        self.returncode, self.calls = None, []
+
+    def poll(self):
+        return self.returncode
+
+    def terminate(self):
+        self.calls.append("terminate")
+        self.returncode = 0
+
+    def wait(self, timeout):
+        self.calls.append("wait")
+
+
+class ChromeDriverService:
+    def __init__(self):
+        self.process = ChromeDriverProcess()
+        self.stopped_after_exit = None
+
+    def stop(self):
+        self.stopped_after_exit = self.process.poll() is not None
+
+
+class QuittingDriver:
+    def __init__(self):
+        self.service = ChromeDriverService()
+
+
+def test_quit_ends_the_session_then_stops_chromedriver_without_polling(monkeypatch):
+    from selenium.webdriver.remote.webdriver import WebDriver
+
+    from app.selenium_driver import Chrome
+
+    ended = []
+    monkeypatch.setattr(WebDriver, "quit", lambda self: ended.append("session"))
+    driver = QuittingDriver()
+    Chrome.quit(driver)
+    assert ended == ["session"]
+    assert driver.service.process.calls == ["terminate", "wait"]
+    assert driver.service.stopped_after_exit is True  # Service.stop() then skips its shutdown polling
+
+
+def test_quit_stops_chromedriver_even_when_the_session_cannot_be_ended(monkeypatch):
+    from selenium.common.exceptions import WebDriverException
+    from selenium.webdriver.remote.webdriver import WebDriver
+
+    from app.selenium_driver import Chrome
+
+    def lost_session(self):
+        raise WebDriverException("chrome not reachable")
+
+    monkeypatch.setattr(WebDriver, "quit", lost_session)
+    driver = QuittingDriver()
+    with pytest.raises(WebDriverException):
+        Chrome.quit(driver)  # the caller turns this into a worker restart
+    assert driver.service.process.calls == ["terminate", "wait"]
+    assert driver.service.stopped_after_exit is True

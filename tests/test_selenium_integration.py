@@ -238,3 +238,17 @@ async def test_browser_deadline_cleans_up_and_next_job_succeeds(browser):
     assert pool.stats()["started"] == 0
     recovered = await fetch("/inspect")
     assert recovered.status_code == 200
+
+
+def test_real_driver_quits_without_polling_the_stopped_chromedriver(monkeypatch):
+    from selenium.webdriver.common.service import Service
+
+    from app.selenium_driver import create_driver
+
+    def polling(self):
+        pytest.fail("Service.send_remote_shutdown_command polls the port in one-second steps")
+
+    monkeypatch.setattr(Service, "send_remote_shutdown_command", polling)
+    driver = create_driver(resolve_options(CrawlRequest(url="https://example.com")), "http://127.0.0.1:9")
+    driver.quit()
+    assert driver.service.process.poll() is not None

@@ -5,9 +5,27 @@ import os
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.remote.webdriver import WebDriver as RemoteWebDriver
 
 from .config import Settings, settings
 from .schemas import CrawlOptions
+
+
+class Chrome(webdriver.Chrome):
+    def quit(self) -> None:
+        """End the session, then stop ChromeDriver directly.
+
+        Deleting the session makes ChromeDriver close Chrome. Selenium's own quit then asks
+        ChromeDriver to shut down and polls its port in one-second steps, about two seconds
+        per job; terminating the now idle process takes milliseconds. Unlike Selenium's quit,
+        a session that cannot be ended raises, so the caller restarts the worker's process group.
+        """
+        try:
+            RemoteWebDriver.quit(self)
+        finally:
+            self.service.process.terminate()
+            self.service.process.wait(5)
+            self.service.stop()  # closes the log handle; an exited process skips the polling
 
 
 def build_options(request: CrawlOptions, proxy_url: str, config: Settings = settings) -> Options:
@@ -41,4 +59,4 @@ def build_options(request: CrawlOptions, proxy_url: str, config: Settings = sett
 
 def create_driver(request: CrawlOptions, proxy_url: str):
     service = Service(executable_path=settings.chromedriver_path, log_output=os.devnull)
-    return webdriver.Chrome(service=service, options=build_options(request, proxy_url))
+    return Chrome(service=service, options=build_options(request, proxy_url))
