@@ -217,8 +217,9 @@ remain overrides. `.env.example` lists all supported settings.
   always send a browser-like `Accept` header.
 - `screenshot=false` by default. A requested screenshot is available only on the
   browser path; choose `mode=js` when a screenshot is required. `screenshot_full_page=true`
-  captures the whole document instead of the viewport, up to 20000 pixels of height; a
-  longer page is cut and the response carries a warning.
+  captures the whole document instead of the viewport, up to 4000 pixels wide and 20000
+  pixels high - the page declares its own layout size, and `max_bytes` does not cover a
+  screenshot. A larger page is cut and the response carries a warning.
 - `extract_metadata=true`: `metadata` with title, description, author, publication
   date, site name, canonical URL and `<html lang>` of an HTML page, as the page declares
   them (Trafilatura). An undeclared canonical URL falls back to the final URL, an

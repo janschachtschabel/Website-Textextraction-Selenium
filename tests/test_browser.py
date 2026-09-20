@@ -453,13 +453,13 @@ def test_browser_status_reports_configured_paths_and_whether_they_exist(tmp_path
 
 
 class LayoutDriver:
-    def __init__(self, height):
-        self.height, self.calls = height, []
+    def __init__(self, height, width=1280):
+        self.height, self.width, self.calls = height, width, []
 
     def execute_cdp_cmd(self, command, params):
         self.calls.append((command, params))
         if command == "Page.getLayoutMetrics":
-            return {"cssContentSize": {"width": 1280, "height": self.height}}
+            return {"cssContentSize": {"width": self.width, "height": self.height}}
         return {"data": "FULLSHOT"}
 
     def get_screenshot_as_base64(self):
@@ -481,7 +481,7 @@ def test_a_full_page_screenshot_captures_the_whole_content():
     assert capture_screenshot(driver, True, warnings) == "FULLSHOT"
     command, params = driver.calls[-1]
     assert command == "Page.captureScreenshot" and params["captureBeyondViewport"] is True
-    assert params["clip"]["height"] == 3000 and warnings == []
+    assert params["clip"] == {"x": 0, "y": 0, "width": 1280, "height": 3000, "scale": 1} and warnings == []
 
 
 def test_a_very_long_page_is_clipped_and_the_response_says_so():
@@ -490,4 +490,15 @@ def test_a_very_long_page_is_clipped_and_the_response_says_so():
     driver, warnings = LayoutDriver(SCREENSHOT_MAX_HEIGHT + 1000), []
     capture_screenshot(driver, True, warnings)
     assert driver.calls[-1][1]["clip"]["height"] == SCREENSHOT_MAX_HEIGHT
+    assert any("clipped" in warning for warning in warnings)
+
+
+def test_a_very_wide_page_is_clipped_too():
+    """The layout size is the page's to declare; both dimensions are bounded."""
+    from app.js_fetcher import SCREENSHOT_MAX_WIDTH, capture_screenshot
+
+    driver, warnings = LayoutDriver(500, width=SCREENSHOT_MAX_WIDTH + 100_000), []
+    capture_screenshot(driver, True, warnings)
+    clip = driver.calls[-1][1]["clip"]
+    assert clip["width"] == SCREENSHOT_MAX_WIDTH and clip["height"] == 500
     assert any("clipped" in warning for warning in warnings)

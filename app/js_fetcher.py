@@ -29,7 +29,11 @@ def permanent_failure(message: str) -> bool:
     return bool(_PERMANENT.search(message))
 
 
-SCREENSHOT_MAX_HEIGHT = 20000  # pixels; one page must not fill a response
+# Pixels. The document declares its own layout size, so both dimensions are bounded:
+# one page must not fill a response, and max_bytes does not cover a screenshot.
+SCREENSHOT_MAX_WIDTH = 4000
+SCREENSHOT_MAX_HEIGHT = 20000
+_LIMITS = {"width": SCREENSHOT_MAX_WIDTH, "height": SCREENSHOT_MAX_HEIGHT}
 
 
 def capture_screenshot(driver, full_page: bool, warnings: list) -> str:
@@ -37,16 +41,13 @@ def capture_screenshot(driver, full_page: bool, warnings: list) -> str:
     if not full_page:
         return driver.get_screenshot_as_base64()
     content = driver.execute_cdp_cmd("Page.getLayoutMetrics", {})["cssContentSize"]
-    height = min(content["height"], SCREENSHOT_MAX_HEIGHT)
-    if content["height"] > height:
-        warnings.append(f"Full-page screenshot clipped at {SCREENSHOT_MAX_HEIGHT} pixels")
+    clip = {name: min(content[name], limit) for name, limit in _LIMITS.items()}
+    cut = [f"{clip[name]} pixels of {name}" for name in _LIMITS if content[name] > clip[name]]
+    if cut:
+        warnings.append("Full-page screenshot clipped at " + " and ".join(cut))
     return driver.execute_cdp_cmd(
         "Page.captureScreenshot",
-        {
-            "format": "png",
-            "captureBeyondViewport": True,
-            "clip": {"x": 0, "y": 0, "width": content["width"], "height": height, "scale": 1},
-        },
+        {"format": "png", "captureBeyondViewport": True, "clip": {"x": 0, "y": 0, **clip, "scale": 1}},
     )["data"]
 
 
