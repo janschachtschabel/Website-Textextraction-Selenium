@@ -119,6 +119,11 @@ class Settings:
                 raise ValueError(f"Invalid {name}")
         if not 1024 <= self.max_request_bytes <= 100 * 1024 * 1024:
             raise ValueError("MAX_REQUEST_BYTES must be 1024..104857600")
+        # resolve_options hands these to every request; an invalid value would be a 500 per crawl.
+        if not 1 <= len(self.default_user_agent) <= 512 or any(
+            ord(c) < 32 or ord(c) > 126 for c in self.default_user_agent
+        ):
+            raise ValueError("DEFAULT_USER_AGENT must be printable ASCII, 1 to 512 characters")
         if len(self.default_accept_language) > 256 or any(
             ord(c) < 32 or ord(c) > 126 for c in self.default_accept_language
         ):

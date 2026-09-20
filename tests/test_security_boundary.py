@@ -208,3 +208,10 @@ async def test_reading_the_rest_of_a_body_stays_bounded():
     await app(_upload_scope(), receive, send)
     assert reads <= DRAIN_BYTES // 65536 + 2
     assert messages[0]["status"] == 413
+
+
+@pytest.mark.parametrize("agent", ["x" * 513, "Crawler\r\nX-Injected: 1", ""])
+def test_a_user_agent_that_no_request_could_use_fails_at_startup(agent):
+    """resolve_options applies it per request; an invalid value would be a 500 on every crawl."""
+    with pytest.raises(ValueError, match="DEFAULT_USER_AGENT"):
+        replace(LOCAL, default_user_agent=agent)
