@@ -19,6 +19,14 @@ def temp_directory():
     return tempfile.gettempdir()
 
 
+def echo(value):
+    return value
+
+
+def busy():
+    time.sleep(60)
+
+
 def stuck_converter():
     Path(tempfile.gettempdir(), "partial-output.txt").write_text("incomplete")
     time.sleep(30)
@@ -101,9 +109,9 @@ async def test_close_stops_every_worker_even_if_one_cleanup_fails(monkeypatch):
     real_stop = workers._Slot.stop
     stopped = []
 
-    def stop(slot):
+    def stop(slot, graceful=False):
         stopped.append(slot)
-        real_stop(slot)
+        real_stop(slot, graceful)
         if len(stopped) == 1:
             raise OSError("simulated cleanup failure")
 
@@ -138,3 +146,31 @@ async def test_failed_worker_cleanup_keeps_original_error_and_is_not_reused(monk
         assert await pool.run(temp_directory, (), Deadline(5))
     finally:
         await pool.close()
+
+
+def test_an_idle_worker_is_asked_to_exit_before_it_is_killed():
+    from app.workers import _Slot
+
+    slot = _Slot()
+    try:
+        assert slot.exchange(echo, ("one",)) == ("ok", "one")
+        slot.stop(graceful=True)
+        # A killed process reports a non-zero code; a clean exit lets it flush what it holds.
+        assert slot.exitcode == 0
+    finally:
+        if slot.exitcode is None:  # only if the graceful stop above never ran
+            slot.stop()
+
+
+def test_a_worker_that_ignores_the_request_is_still_killed():
+    from app.workers import _Slot
+
+    slot = _Slot()
+    try:
+        slot.sender.send((busy, ()))  # busy: it will not read the shutdown request
+        time.sleep(0.2)
+        slot.stop(graceful=True)
+        assert slot.exitcode not in (0, None)
+    finally:
+        if slot.exitcode is None:
+            slot.stop()

@@ -44,6 +44,7 @@ dev = [
     "hatchling>=1.27",
     "cryptography>=50",  # self-signed certificate for the browser TLS test; no upper bound (blocks fixes)
     "pip-audit>=2.9,<3",  # dependency advisories, also run in CI
+    "coverage>=7,<8",  # measures the spawned workers too
 ]
 loadtest = ["aiohttp>=3.9.0,<4", "matplotlib>=3.9.0,<4", "numpy>=1.26.0,<3"]
 
@@ -99,6 +100,18 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
+
+# ---------------------------------------------------------------------------
+# Coverage - workers run in spawned processes and are measured with the parent
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["app"]
+parallel = true
+concurrency = ["thread", "multiprocessing"]
+sigterm = true
+
+[tool.coverage.report]
+skip_covered = true
 
 # ---------------------------------------------------------------------------
 # Pytest

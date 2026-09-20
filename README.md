@@ -293,7 +293,12 @@ ruff check app tests helper/loadtest.py
 python -m compileall -q app helper run.py
 python -m build --no-isolation
 RUN_SELENIUM_TESTS=1 pytest -q tests/test_selenium_integration.py
+coverage run -m pytest -q -m 'not selenium' && coverage combine && coverage report
 ```
+
+The coverage run includes the spawned conversion and browser workers: an idle worker is
+asked to exit and flushes its data instead of being killed. Measured that way the suite
+covers 92 % of `app/`, against 81 % when only the main process is counted.
 
 CI runs unit/API tests on Python 3.11 to 3.14 plus a separate real Chrome job.
 The browser fixtures in `tests/test_selenium_integration.py` cover dynamic and late

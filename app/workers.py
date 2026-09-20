@@ -22,6 +22,7 @@ from .results import CrawlError
 # Windows keeps files of just-terminated Chrome processes locked for a moment. Such worker
 # directories are removed on a later attempt instead of failing the request that timed out.
 _leftover_directories: set[str] = set()
+GRACE_SECONDS = 2  # an idle worker leaves in milliseconds
 
 
 def _remove_leftover_directories():
@@ -69,12 +70,37 @@ class _Slot:
         incoming.close()
         outgoing.close()
         self.jobs = 0
+        self.exitcode = None
 
     def exchange(self, function, args):
         self.sender.send((function, args))
         return self.receiver.recv()
 
-    def stop(self):
+    def stop(self, graceful: bool = False):
+        """Stop the worker and its children.
+
+        ``graceful`` asks an idle worker to leave on its own first, so it can flush what it
+        holds - buffered output, coverage data. One that does not leave in time is killed.
+        """
+        if not (graceful and self._leaves_on_request()):
+            self._kill()
+        self.process.join(timeout=1)
+        self.exitcode = self.process.exitcode
+        self.sender.close()
+        self.receiver.close()
+        with suppress(ValueError):  # still running despite the kill: nothing more to do here
+            self.process.close()
+        self.directory.cleanup()
+        if os.path.exists(self.directory.name):
+            _leftover_directories.add(self.directory.name)
+
+    def _leaves_on_request(self) -> bool:
+        with suppress(OSError, ValueError):
+            self.sender.send(None)
+            self.process.join(timeout=GRACE_SECONDS)
+        return not self.process.is_alive()
+
+    def _kill(self):
         try:
             if os.name == "posix":
                 with suppress(ProcessLookupError):
@@ -88,20 +114,12 @@ class _Slot:
             logger.warning("Worker process group kill failed ({})", type(exc).__name__)
         if self.process.is_alive():
             self.process.kill()
-        self.process.join(timeout=1)
-        self.sender.close()
-        self.receiver.close()
-        with suppress(ValueError):  # still running despite the kill: nothing more to do here
-            self.process.close()
-        self.directory.cleanup()
-        if os.path.exists(self.directory.name):
-            _leftover_directories.add(self.directory.name)
 
 
-def _stop(slot):
+def _stop(slot, graceful: bool = False):
     """Stop a worker; a cleanup failure is logged and never replaces the caller's outcome."""
     try:
-        slot.stop()
+        slot.stop(graceful)
     except Exception as exc:
         logger.error("Worker cleanup failed ({})", type(exc).__name__)
 
@@ -141,7 +159,7 @@ class WorkerPool:
                 # lxml, MarkItDown and Chrome keep memory that only a new process gives back.
                 retired, slot = slot, None  # the idle queue gets None: the next job starts a worker
                 self.slots.discard(retired)
-                await asyncio.to_thread(_stop, retired)
+                await asyncio.to_thread(_stop, retired, True)  # idle: let it flush and exit
             return reply[1]
         except BaseException:
             if slot is not None:
@@ -161,8 +179,8 @@ class WorkerPool:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        for slot in self.slots:
-            _stop(slot)
+        # Whatever was busy has been cancelled and stopped above; these slots are idle.
+        await asyncio.gather(*(asyncio.to_thread(_stop, slot, True) for slot in self.slots))
         self.slots.clear()
         _remove_leftover_directories()
 

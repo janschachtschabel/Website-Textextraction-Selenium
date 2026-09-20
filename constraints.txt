@@ -25,6 +25,7 @@ colorama==0.4.6
 coloredlogs==15.0.1
 contourpy==1.4.0
 courlan==1.4.0
+coverage==7.16.1
 cryptography==50.0.1
 cycler==0.12.1
 cyclonedx-python-lib==11.12.0
