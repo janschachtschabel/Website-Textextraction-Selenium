@@ -31,6 +31,7 @@ class BodySizeLimit:
             return await self.app(scope, receive, send)
         declared = _declared_length(scope["headers"])
         if declared is not None and declared > self.max_bytes:
+            await self._drain(receive)
             return await self._reject(send)
         body = b""
         pending = []

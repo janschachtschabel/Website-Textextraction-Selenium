@@ -169,6 +169,27 @@ async def test_the_rest_of_an_oversized_body_is_read_before_the_error_is_sent():
     assert messages[0]["status"] == 413
 
 
+async def test_a_declared_oversized_length_also_reads_the_upload_first():
+    app = create_app(replace(LOCAL, max_request_bytes=1024))
+    scope = _upload_scope()
+    scope["headers"] = [*scope["headers"], (b"content-length", b"2048")]
+    remaining = [
+        {"type": "http.request", "body": b"x" * 1024, "more_body": True},
+        {"type": "http.request", "body": b"x" * 1024, "more_body": False},
+    ]
+    messages = []
+
+    async def receive():
+        return remaining.pop(0) if remaining else {"type": "http.disconnect"}
+
+    async def send(message):
+        messages.append(message)
+
+    await app(scope, receive, send)
+    assert remaining == []  # the declared length is the common case: it must not close early either
+    assert messages[0]["status"] == 413
+
+
 async def test_reading_the_rest_of_a_body_stays_bounded():
     from app.body_limit import DRAIN_BYTES
 
