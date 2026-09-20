@@ -2,8 +2,10 @@ import asyncio
 import base64
 
 import httpx
+import pytest
 
 from app.egress_proxy import EgressProxy, dial_target
+from app.results import CrawlError
 from app.security import Target
 
 
@@ -132,4 +134,29 @@ async def test_proxy_shutdown_cancels_open_tunnels_before_waiting_for_server():
         for task in list(remote_tasks):
             task.cancel()
         await asyncio.gather(*list(remote_tasks), return_exceptions=True)
+        await server.wait_closed()
+
+
+@pytest.mark.parametrize("reply", [b"garbage\r\n\r\n", b"\r\n\r\n", b"HTTP/1.1\r\n\r\n"])
+async def test_a_malformed_upstream_proxy_reply_is_a_crawl_error(reply):
+    """Not a 502 but an IndexError, it would abort the tunnel instead of answering it."""
+    from app.egress_proxy import dial_upstream
+
+    async def upstream(reader, writer):
+        await reader.readuntil(b"\r\n\r\n")
+        writer.write(reply)
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(upstream, "127.0.0.1", 0)
+    try:
+        port = server.sockets[0].getsockname()[1]
+        with pytest.raises(CrawlError, match="Upstream proxy rejected"):
+            await dial_upstream(
+                Target("remote.example", 443, ("93.184.216.34",), "https"),
+                f"http://127.0.0.1:{port}",
+                protection=False,
+            )
+    finally:
+        server.close()
         await server.wait_closed()

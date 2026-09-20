@@ -50,7 +50,7 @@ async def dial_upstream(target: Target, proxy: str, protection: bool):
         writer.write((headers + "\r\n").encode("ascii"))
         await writer.drain()
         response = await reader.readuntil(b"\r\n\r\n")
-        if response.split(b" ", 2)[1] != b"200":
+        if response.split(b" ", 2)[1:2] != [b"200"]:  # a status line without a status is a rejection
             raise CrawlError("Upstream proxy rejected the connection")
         return reader, writer
     except BaseException:
