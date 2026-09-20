@@ -426,3 +426,27 @@ def test_browser_gets_the_language_list_without_q_values():
     unset = resolve_options(CrawlRequest(url="https://example.com", accept_language=""))
     arguments = build_options(unset, "http://127.0.0.1:1234", settings).arguments
     assert not any(argument.startswith("--accept-lang") for argument in arguments)
+
+
+def test_browser_status_reports_configured_paths_and_whether_they_exist(tmp_path):
+    from dataclasses import replace
+
+    from app.selenium_driver import browser_status
+
+    present = tmp_path / "chrome"
+    present.write_text("binary", encoding="utf-8")
+    configured = replace(settings, chrome_binary=str(present), chromedriver_path=str(tmp_path / "gone"))
+    assert browser_status(configured) == {
+        "chrome_binary": str(present),
+        "chrome_binary_exists": True,
+        "chromedriver_path": str(tmp_path / "gone"),
+        "chromedriver_exists": False,
+    }
+    # Unset paths are resolved by Selenium Manager at first use, so their presence is unknown.
+    unset = replace(settings, chrome_binary=None, chromedriver_path=None)
+    assert browser_status(unset) == {
+        "chrome_binary": None,
+        "chrome_binary_exists": None,
+        "chromedriver_path": None,
+        "chromedriver_exists": None,
+    }

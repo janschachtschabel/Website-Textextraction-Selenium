@@ -1,6 +1,7 @@
 """Selenium driver configuration. Each job receives a fresh browser profile."""
 
 import os
+from pathlib import Path
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -26,6 +27,17 @@ class Chrome(webdriver.Chrome):
             self.service.process.terminate()
             self.service.process.wait(5)
             self.service.stop()  # closes the log handle; an exited process skips the polling
+
+
+def browser_status(config: Settings = settings) -> dict:
+    """Configured browser paths and whether they exist; unset means Selenium Manager resolves them."""
+    status = {}
+    for name, path in (("chrome_binary", config.chrome_binary), ("chromedriver_path", config.chromedriver_path)):
+        status[name] = path
+        status[f"{name.removesuffix('_path')}_exists" if name.endswith("_path") else f"{name}_exists"] = (
+            Path(path).exists() if path else None
+        )
+    return status
 
 
 def build_options(request: CrawlOptions, proxy_url: str, config: Settings = settings) -> Options:

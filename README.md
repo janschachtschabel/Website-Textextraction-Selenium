@@ -30,7 +30,9 @@ python run.py
 refuses to start with a non-loopback host and no key. The examples below assume the
 key is also exported in your shell. `/docs`, `/redoc` and `/openapi.json` document
 the request and response schema and are served only while no key is configured.
-`/health` is public and reports process readiness even while all workers are busy.
+`/health` is public and reports process readiness even while all workers are busy, plus
+the configured Chrome and ChromeDriver paths and whether they exist - a missing binary
+is also logged as a warning at startup instead of failing the first browser job.
 `/stats` uses the same Bearer authentication as the crawl endpoints, and so does
 `/metrics`, which serves Prometheus text format: cumulative request, cache-hit and
 coalescing counters, a latency histogram of fresh successful extractions, and gauges

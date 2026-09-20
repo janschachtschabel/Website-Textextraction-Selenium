@@ -97,3 +97,29 @@ def test_json_logs_omit_local_variable_values(capsys):
         logger.remove()
     assert "Extraction failed" in output and "RuntimeError" in output
     assert "s3cr3t-value" not in output
+
+
+async def test_a_missing_chrome_binary_is_reported_at_startup_and_in_health(tmp_path, monkeypatch):
+    records = []
+    # The startup warning is logged before a test could attach a sink, so keep the app's own setup out.
+    monkeypatch.setattr("app.main.setup_logging", lambda *args: None)
+    sink = logger.add(lambda message: records.append(message.record), level="WARNING")
+    config = replace(
+        settings,
+        result_cache_dir=str(tmp_path),
+        host="127.0.0.1",
+        api_key=None,
+        chrome_binary=str(tmp_path / "no-chrome-here"),
+    )
+    resources = Resources(
+        config, transport=httpx.MockTransport(lambda request: httpx.Response(200)), validate=lambda url: None
+    )
+    app = create_app(config, resources)
+    try:
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                health = (await client.get("/health")).json()
+    finally:
+        logger.remove(sink)
+    assert health["browser"]["chrome_binary_exists"] is False
+    assert any("no-chrome-here" in record["message"] for record in records)

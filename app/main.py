@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Path, Security
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from loguru import logger
 
 from . import __version__
 from .body_limit import BodySizeLimit
@@ -25,12 +26,19 @@ from .schemas import (
     JobStatus,
     resolve_options,
 )
+from .selenium_driver import browser_status
 
 
 def create_app(config=settings, resources=None):
     @asynccontextmanager
     async def lifespan(application):
         setup_logging(config.log_level, config.log_json)
+        browser = browser_status(config)
+        for setting in ("chrome_binary", "chromedriver_path"):
+            if browser[f"{setting.removesuffix('_path')}_exists"] is False:
+                logger.warning(
+                    "{} is set to {}, which does not exist; browser jobs will fail", setting.upper(), browser[setting]
+                )
         async with resources or Resources(config) as active:
             application.state.resources = active
             yield
@@ -81,6 +89,7 @@ def create_app(config=settings, resources=None):
                 "capacity": active.service.capacity.stats(),
                 "selenium": active.browser_pool.stats(),
                 "conversion": active.conversion_pool.stats(),
+                "browser": browser_status(config),
             },
             status_code=200 if active.ready else 503,
         )
