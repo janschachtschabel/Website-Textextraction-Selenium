@@ -81,6 +81,9 @@ async def test_each_batch_url_uses_global_capacity_and_errors_are_counted(api):
     assert body["results"][1]["result"]["status_code"] == 429
     assert body["results"][1]["result"]["fetch_engine"] == "http"
     assert body["results"][2]["result"]["extraction_status"] == "empty"
+    # The upstream status is the reason; "blocked" only says how the body was classified.
+    assert body["results"][1]["error"] == "Upstream status 429"
+    assert body["results"][2]["error"] == "Extraction empty"
     stats = (await client.get("/stats")).json()
     assert stats["requests_success"] == 1 and stats["requests_error"] == 2
 
@@ -270,7 +273,7 @@ async def test_batch_pipeline_runs_without_the_http_layer(api):
     response = await resources.service.crawl_batch(urls, options, max_concurrency=2)
     assert (response.total, response.succeeded, response.failed) == (3, 2, 1)
     assert [item.url for item in response.results] == urls
-    assert response.results[-1].error == "Extraction blocked"
+    assert response.results[-1].error == "Upstream status 429"
     assert state["peak"] <= 2
 
 

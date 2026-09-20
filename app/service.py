@@ -21,14 +21,16 @@ STALE = "stale:"  # result plus ETag/Last-Modified, kept for REVALIDATION_TTL af
 
 def failure_reason(result: CrawlResponse) -> str:
     """Why success is false. Mirrors the rule in CrawlService._extract; change both together."""
-    if result.extraction_status != "ok":
-        return f"Extraction {result.extraction_status}"
-    if result.truncated:
-        return "Extraction truncated"
+    # The upstream status comes first: a 4xx body is classified "blocked", which would
+    # otherwise hide the status that actually explains the failure.
     if result.status_code is None:
         return "Upstream status unknown"
     if not 200 <= result.status_code < 300:
         return f"Upstream status {result.status_code}"
+    if result.extraction_status != "ok":
+        return f"Extraction {result.extraction_status}"
+    if result.truncated:
+        return "Extraction truncated"
     return "Extraction incomplete"  # e.g. a rendered page that never settled; see warnings
 
 

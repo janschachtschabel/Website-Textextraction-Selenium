@@ -70,7 +70,7 @@ async def test_a_job_runs_in_the_background_and_reports_the_batch_result(jobs_ap
         assert done["status"] == "done" and done["finished_at"] and done["error"] is None
         result = done["result"]
         assert (result["total"], result["succeeded"], result["failed"]) == (2, 1, 1)
-        assert result["results"][1]["error"] == "Extraction blocked"
+        assert result["results"][1]["error"] == "Upstream status 429"
 
 
 async def test_unknown_jobs_answer_404(jobs_api):
