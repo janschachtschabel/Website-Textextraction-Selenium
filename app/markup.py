@@ -4,6 +4,8 @@ import re
 
 from bs4 import BeautifulSoup, UnicodeDammit
 
+from .mathml import to_latex
+
 
 def decode_text(data: bytes, content_type: str | None = None) -> str:
     # UnicodeDammit decodes strictly and then guesses: one bad byte, or a character cut at
@@ -48,6 +50,33 @@ def enhance_table_structure(text: str) -> str:
     return "\n".join(result)
 
 
+_HIDDEN = re.compile(r"display\s*:\s*none|visibility\s*:\s*hidden", re.I)
+
+
+def _presentation(equation) -> str:
+    """MathML carries the structure of the formula; other markup holds rendered glyphs only."""
+    if equation.name == "math":
+        return to_latex(equation) or equation.get_text(" ", strip=True)
+    return equation.get_text(" ", strip=True)
+
+
+def _reveal(replacement):
+    """Unhide the wrappers that exist only to keep this formula from sighted readers.
+
+    Wikipedia ships its MathML in a ``display: none`` span next to a rendered image, and
+    extractors drop hidden content - so the substituted LaTeX would never reach the output.
+    A wrapper holding anything besides the formula keeps its styling.
+    """
+    formula = replacement.string
+    for parent in replacement.parents:
+        if parent.name in {"body", "html", "[document]"} or parent.get_text(" ", strip=True) != formula:
+            return
+        if _HIDDEN.search(parent.get("style", "")):
+            del parent["style"]
+        for attribute in ("aria-hidden", "hidden"):
+            parent.attrs.pop(attribute, None)
+
+
 def prepare_html(data: bytes, content_type: str | None) -> BeautifulSoup:
     soup = BeautifulSoup(decode_text(data, content_type), "lxml")
     for equation in soup.select('script[type^="math/tex"], math, mjx-container'):
@@ -57,12 +86,13 @@ def prepare_html(data: bytes, content_type: str | None) -> BeautifulSoup:
         source = (
             equation.get("data-tex")
             or equation.get("data-latex")
-            or (annotation.get_text() if annotation else equation.get_text(" ", strip=True))
+            or (annotation.get_text() if annotation else _presentation(equation))
         )
         if source:
             replacement = soup.new_tag("span")
             replacement.string = "$$" + source + "$$"
             equation.replace_with(replacement)
+            _reveal(replacement)
     for tag in soup.select("[data-tex], [data-latex]"):
         source = tag.get("data-tex") or tag.get("data-latex")
         tag.clear()

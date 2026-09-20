@@ -99,9 +99,12 @@ A short useful page is a success. A cookie/privacy phrase or RSS discovery link
 alone does not trigger Selenium. HTTP errors and detected challenge pages do not
 trigger attempts to bypass the block. PDF, Office and feed bodies use document
 conversion rather than browser routing. With `mode=js`, Chrome downloads such
-files instead of rendering them: the result has no text and a warning. Source
-LaTeX/MathML is preserved when available; formulas present only as pixels cannot
-be reconstructed reliably.
+files instead of rendering them: the result has no text and a warning. Formulas
+appear as `$$...$$`: a page's own TeX when it publishes one, otherwise its
+presentation MathML translated to LaTeX, so radicals, fractions, exponents and
+vector arrows survive. A MathML copy that the page hides from sighted readers is
+unhidden, because extractors drop hidden content. Formulas present only as pixels
+cannot be reconstructed reliably.
 
 Important result fields:
 

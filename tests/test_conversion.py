@@ -169,3 +169,37 @@ def test_legacy_page_without_or_with_wrong_charset_keeps_its_umlauts(content_typ
 def test_rendered_math_prefers_preserved_latex_over_svg_glyph_text():
     html = '<main><p>Equation <mjx-container data-latex="x^2+y^2=z^2"><svg><text>x2+y2</text></svg></mjx-container></p></main>'
     assert "x^2+y^2=z^2" in bytes_to_markdown(html.encode(), "text/html", html_converter="bs4")
+
+
+MATHML_LENGTH = (
+    "<math><mrow><mi>|</mi><mover><mi>a</mi><mo>→</mo></mover><mi>|</mi><mo>=</mo></mrow>"
+    "<mrow><msqrt><mrow><msubsup><mi>a</mi><mn>1</mn><mn>2</mn></msubsup><mo>+</mo>"
+    "<msubsup><mi>a</mi><mn>2</mn><mn>2</mn></msubsup></mrow></msqrt></mrow></math>"
+)
+
+
+def test_presentation_mathml_becomes_latex_instead_of_flattened_text():
+    html = f"<html><body><p>Es gilt {MATHML_LENGTH}.</p></body></html>"
+    markdown = bytes_to_markdown(html.encode(), "text/html", html_converter="bs4")
+    assert r"$$| \vec{a} | = \sqrt{a_{1}^{2} + a_{2}^{2}}$$" in markdown
+    assert "a 1 2" not in markdown
+
+
+def test_a_tex_annotation_still_wins_over_the_presentation_markup():
+    html = (
+        "<html><body><p>Es gilt <math><semantics><mrow><msup><mi>a</mi><mn>2</mn></msup></mrow>"
+        '<annotation encoding="application/x-tex">a^{2}</annotation></semantics></math>.</p></body></html>'
+    )
+    assert "$$a^{2}$$" in bytes_to_markdown(html.encode(), "text/html", html_converter="bs4")
+
+
+def test_a_hidden_accessibility_wrapper_does_not_swallow_the_formula():
+    """Wikipedia hides the MathML copy from sighted readers; trafilatura drops hidden content."""
+    formula = (
+        '<span class="mwe-math-element"><span class="mwe-math-mathml-inline" style="display: none;">'
+        '<math><semantics><annotation encoding="application/x-tex">a^{2}+b^{2}=c^{2}</annotation>'
+        "</semantics></math></span>"
+        '<img alt="a^{2}+b^{2}=c^{2}" aria-hidden="true" src="/formula.svg"></span>'
+    )
+    markdown = trafilatura_markdown(f"<main>{{}}<p>Der Satz lautet {formula}.</p></main>")
+    assert "$$a^{2}+b^{2}=c^{2}$$" in markdown
