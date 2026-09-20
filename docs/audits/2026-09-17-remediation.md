@@ -16,7 +16,7 @@ on Python 3.13.15.
 | A06 | Clients can disable the operator rate limit | Fixed: the server default is a ceiling | `063870f` |
 | A07 | No lockfile, no dependency scan in CI | Partly fixed: `constraints.txt` and a `pip-audit` step once per workflow; see follow-ups | `6bdf614`, `f197678`, `d8fc363` |
 | A08 | `links` feature untested | Fixed: 33 cases for extraction and classification | `fa4f82c` |
-| A09 | HTML parsed up to three times | Partly fixed: routing parse removed outside auto mode; see follow-ups | `d56f751` |
+| A09 | HTML parsed up to three times | Fixed: routing parse removed outside auto mode, and inside it whenever the extraction proves the page is not a shell | `d56f751`, `ed9dfea` |
 | A10 | Dead helpers contradicting documented behaviour | Fixed: removed, rest moved to `app/links.py` | `1761823` |
 | A11 | Dev cap blocks a cryptography fix | Fixed: `cryptography>=50`, no upper bound | `6bdf614` |
 | A12 | Public docs with a key configured | Fixed: docs routes off when `API_KEY` is set | `3ed0816` |
@@ -42,9 +42,9 @@ on Python 3.13.15.
   still installs the newest compatible releases on purpose, so upstream breakage surfaces
   early; `pip-audit` gates every build, once per workflow because the advisory service
 answers the same for every entry of the matrix.
-- **One parse per document (A09).** Sharing the parsed tree between conversion and link
-  extraction requires `convert_document` to hand out its soup, which would change its
-  contract for every content type. The remaining second parse only happens when
+- **One parse per document (A09).** Closed for the routing check in 0.7.0. Sharing the
+  conversion tree with link extraction still requires `convert_document` to hand out its soup,
+  which would change its contract for every content type; that parse only happens when
   `extract_links` is requested.
 - **Complexity of `_classify_link`, `convert_html`, `embedded_html`, `selenium_fetch`,
   `read_body` (A21).** Left for the next functional change in each, as the audit suggests.

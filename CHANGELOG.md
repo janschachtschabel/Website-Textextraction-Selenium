@@ -3,6 +3,33 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## 0.7.0 — 2026-09-20
+
+### Added
+
+- `/health` reports the configured Chrome and ChromeDriver paths and whether they exist; a
+  configured path that does not exist is logged as a warning at startup.
+- Every response carries `X-Request-ID` (the client's plain token of at most 64 characters, or a
+  generated one), and the failure log lines of that request - including its batch items and
+  background job - carry the same id.
+
+### Changed
+
+- Auto mode no longer parses the document a second time when the extraction already proves the
+  page is not a JavaScript shell: 1000 characters of visible extracted text answer both shell
+  rules. Measured on a 540 KiB article, the conversion worker fell from 271 ms to 165 ms, the
+  same as fast mode. This closes the open part of audit finding A09.
+- An oversized upload is read to its end, bounded to 4 MiB and one second, before the 413 goes
+  out, so clients read the error instead of a connection reset.
+
+### Measured and deliberately unchanged
+
+- Metrics buffering: the shared state store takes 3700 records per second, far beyond anything
+  the service can produce.
+- A DNS cache: a repeated resolution costs 0.3-0.9 ms because the OS resolver already caches.
+- A browser circuit breaker: deterministic failures are already excluded from retries, and a
+  breaker would add state that can wrongly block a site after a transient run of failures.
+
 ## 0.6.0 — 2026-09-18
 
 ### Added
