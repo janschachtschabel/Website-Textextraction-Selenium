@@ -3,7 +3,7 @@
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 from .config import Settings, settings
 from .results import ExtractionStatus
@@ -39,11 +39,18 @@ class CrawlOptions(BaseModel):
     extract_links: bool = False
     extract_metadata: bool = False
     screenshot: bool = False
+    screenshot_full_page: bool = Field(False, description="Whole document instead of the viewport")
     anonymize: bool = False
     anonymize_language: Literal["de", "en"] = "de"
     crawl_rate_limit_rps: float | None = Field(None, ge=0, le=100)
     respect_robots_txt: bool | None = None
     force_refresh: bool = False
+
+    @model_validator(mode="after")
+    def full_page_needs_a_screenshot(self):
+        if self.screenshot_full_page and not self.screenshot:
+            raise ValueError("screenshot_full_page requires screenshot")
+        return self
 
     @field_validator("proxy")
     @classmethod

@@ -29,6 +29,27 @@ def permanent_failure(message: str) -> bool:
     return bool(_PERMANENT.search(message))
 
 
+SCREENSHOT_MAX_HEIGHT = 20000  # pixels; one page must not fill a response
+
+
+def capture_screenshot(driver, full_page: bool, warnings: list) -> str:
+    """The viewport, or the whole document when asked - bounded, and the response says when it is cut."""
+    if not full_page:
+        return driver.get_screenshot_as_base64()
+    content = driver.execute_cdp_cmd("Page.getLayoutMetrics", {})["cssContentSize"]
+    height = min(content["height"], SCREENSHOT_MAX_HEIGHT)
+    if content["height"] > height:
+        warnings.append(f"Full-page screenshot clipped at {SCREENSHOT_MAX_HEIGHT} pixels")
+    return driver.execute_cdp_cmd(
+        "Page.captureScreenshot",
+        {
+            "format": "png",
+            "captureBeyondViewport": True,
+            "clip": {"x": 0, "y": 0, "width": content["width"], "height": height, "scale": 1},
+        },
+    )["data"]
+
+
 def navigation_failed(code):
     return CrawlError(f"Selenium navigation failed ({code})" if code else "Selenium navigation failed", 502)
 
@@ -109,7 +130,9 @@ def selenium_fetch(url, options, proxy_url, expires_at):
         if truncated:
             warnings.append("Rendered HTML truncated at max_bytes")
         screenshot = (
-            driver.get_screenshot_as_base64() if page and options.screenshot and not options.anonymize else None
+            capture_screenshot(driver, options.screenshot_full_page, warnings)
+            if page and options.screenshot and not options.anonymize
+            else None
         )
         final_url = driver.current_url
         return FetchResult(

@@ -212,7 +212,9 @@ remain overrides. `.env.example` lists all supported settings.
   given; Chrome receives the language list and sets its own q-values. HTTP requests
   always send a browser-like `Accept` header.
 - `screenshot=false` by default. A requested screenshot is available only on the
-  browser path; choose `mode=js` when a screenshot is required.
+  browser path; choose `mode=js` when a screenshot is required. `screenshot_full_page=true`
+  captures the whole document instead of the viewport, up to 20000 pixels of height; a
+  longer page is cut and the response carries a warning.
 - `extract_metadata=true`: `metadata` with title, description, author, publication
   date, site name, canonical URL and `<html lang>` of an HTML page, as the page declares
   them (Trafilatura). An undeclared canonical URL falls back to the final URL, an

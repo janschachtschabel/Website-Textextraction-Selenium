@@ -97,3 +97,9 @@ def test_accept_language_must_be_a_short_printable_header_value(value, problem):
         return
     with pytest.raises(ValidationError, match=problem):
         CrawlRequest(url="https://example.com", accept_language=value)
+
+
+def test_a_full_page_screenshot_requires_a_screenshot():
+    assert CrawlRequest(url="https://example.com", screenshot=True, screenshot_full_page=True).screenshot_full_page
+    with pytest.raises(ValidationError, match="screenshot"):
+        CrawlRequest(url="https://example.com", screenshot_full_page=True)

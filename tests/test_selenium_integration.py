@@ -69,6 +69,9 @@ async def browser(monkeypatch):
                 html = '<h1>Results</h1><div id="list" aria-busy="true"></div><script>setTimeout(()=>{const e=document.getElementById("list");e.innerText="LATE"+"CONTENT arrived";e.removeAttribute("aria-busy")},1500)</script>'
             elif path == "/modal-spinner":
                 html = '<div aria-hidden="true"><main>Page behind a dialog</main><div role="progressbar" style="width:40px;height:40px"></div></div><div role="dialog">Consent</div><script>setTimeout(()=>{document.querySelector("[role=progressbar]").remove();document.querySelector("main").innerText="LATE"+"CONTENT arrived"},1500)</script>'
+            elif path == "/tall":
+                blocks = "".join(f"<p style='height:200px'>Block {index}</p>" for index in range(20))
+                html = "<main>Long page</main>" + blocks
             elif path == "/download":
                 html, content_type = "<main>Lesson file</main>", "application/octet-stream"  # Chrome downloads it
             else:
@@ -265,3 +268,18 @@ async def test_browser_sends_the_requested_accept_language(browser):
         if line.startswith("accept-language:")
     ]
     assert languages and languages[-1].startswith("de-de") and "en" in languages[-1]
+
+
+async def test_a_full_page_screenshot_covers_more_than_the_viewport(browser):
+    import base64
+    import struct
+
+    fetch, _, _ = browser
+
+    def png_size(shot):
+        return struct.unpack(">II", base64.b64decode(shot)[16:24])
+
+    viewport = await fetch("/tall", screenshot=True)
+    whole = await fetch("/tall", screenshot=True, screenshot_full_page=True)
+    assert png_size(whole.screenshot_base64)[1] > png_size(viewport.screenshot_base64)[1] * 2
+    assert not whole.warnings
