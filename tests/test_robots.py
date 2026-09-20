@@ -93,3 +93,22 @@ def test_robots_check_is_off_by_default():
     from app.schemas import CrawlRequest, resolve_options
 
     assert resolve_options(CrawlRequest(url="https://example.com"), settings).respect_robots_txt is False
+
+
+async def test_robots_entries_of_different_transports_do_not_mix(robots_api):
+    """What comes back depends on the transport, and every later request trusts the answer."""
+    client, fetched = robots_api
+    assert (await crawl(client, "https://rules.example/lessons/optics")).status_code == 200
+    assert (await crawl(client, "https://rules.example/lessons/optics", allow_insecure_ssl=True)).status_code == 200
+    assert fetched == ["rules.example", "rules.example"]
+
+
+def test_a_caller_supplied_proxy_gets_its_own_robots_entry():
+    from app.robots import cache_key
+    from app.schemas import CrawlOptions
+
+    plain = CrawlOptions()
+    assert cache_key("https://rules.example", plain) == cache_key("https://rules.example", CrawlOptions())
+    assert cache_key("https://rules.example", plain) != cache_key("https://other.example", plain)
+    for transport in (CrawlOptions(proxy="http://proxy.example:8080"), CrawlOptions(allow_insecure_ssl=True)):
+        assert cache_key("https://rules.example", plain) != cache_key("https://rules.example", transport)

@@ -1,5 +1,7 @@
 """Opt-in robots.txt check (RFC 9309) for the requested URL of a crawl."""
 
+import hashlib
+import json
 from urllib.parse import urlsplit
 
 from protego import Protego
@@ -10,6 +12,18 @@ from .results import CrawlError
 ROBOTS_MAX_BYTES = 512 * 1024  # RFC 9309 asks crawlers to parse at least 500 KiB
 KEEP_SECONDS = 3600  # a fetched or unavailable robots.txt, per origin
 RETRY_SECONDS = 300  # an unreachable one counts as a complete disallow for this long
+
+
+def cache_key(origin: str, options) -> str:
+    """One entry per origin and transport.
+
+    The answer is shared by every later request, so a caller's own proxy or relaxed TLS
+    must not decide what the next caller is allowed to crawl - the result cache hashes
+    every option for the same reason. The user agent stays out: only the raw text is
+    kept, and each request parses it against its own agent.
+    """
+    transport = json.dumps([options.proxy, options.allow_insecure_ssl], sort_keys=True)
+    return "robots:" + origin + ":" + hashlib.sha256(transport.encode()).hexdigest()[:16]
 
 
 class RobotsPolicy:
@@ -27,10 +41,11 @@ class RobotsPolicy:
         resources = self.resources
         parts = urlsplit(url)
         origin = f"{parts.scheme}://{parts.netloc}"
-        rules = await resources.io(resources.cache.get, "robots:" + origin)
+        key = cache_key(origin, options)
+        rules = await resources.io(resources.cache.get, key)
         if rules is None:
             rules, keep = await self._fetch(origin, options, deadline)
-            await resources.io(resources.cache.set, "robots:" + origin, rules, expire=keep)
+            await resources.io(resources.cache.set, key, rules, expire=keep)
         if "all" in rules:
             return rules["all"]
         return Protego.parse(rules["text"]).can_fetch(url, options.user_agent)
