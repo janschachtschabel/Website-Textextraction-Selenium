@@ -85,13 +85,17 @@ def create_app(config=settings, resources=None):
     @application.get("/health")
     async def health():
         active = application.state.resources
+        browser = browser_status(config)
+        if config.api_key:
+            # The endpoint stays public: report whether the browser is there, not where.
+            browser = {name: value for name, value in browser.items() if name.endswith("_exists")}
         return JSONResponse(
             {
                 "status": "ok" if active.ready else "stopping",
                 "capacity": active.service.capacity.stats(),
                 "selenium": active.browser_pool.stats(),
                 "conversion": active.conversion_pool.stats(),
-                "browser": browser_status(config),
+                "browser": browser,
             },
             status_code=200 if active.ready else 503,
         )

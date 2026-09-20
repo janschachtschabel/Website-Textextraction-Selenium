@@ -155,3 +155,26 @@ async def test_a_failing_metrics_store_does_not_replace_the_result(api, monkeypa
     response = await client.post("/crawl", json={"url": "https://example.com/article"})
     assert response.status_code == 200 and response.json()["success"]
     assert [record["message"] for record in records] == ["Metrics not recorded (RuntimeError)"]
+
+
+async def test_a_key_protected_health_endpoint_reports_no_filesystem_paths(tmp_path, monkeypatch):
+    """/health stays public, so a protected deployment does not advertise where its browser lives."""
+    monkeypatch.setattr("app.main.setup_logging", lambda *args: None)
+    config = replace(
+        settings,
+        result_cache_dir=str(tmp_path),
+        host="127.0.0.1",
+        api_key="token",
+        chrome_binary=str(tmp_path / "chrome"),
+    )
+    resources = Resources(
+        config, transport=httpx.MockTransport(lambda request: httpx.Response(200)), validate=lambda url: None
+    )
+    app = create_app(config, resources)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/health")
+    assert response.status_code == 200
+    health = response.json()
+    assert health["browser"] == {"chrome_binary_exists": False, "chromedriver_exists": None}
+    assert str(tmp_path) not in str(health)
