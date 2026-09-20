@@ -4,8 +4,11 @@ An HTTP-first FastAPI service that extracts web pages and documents into Markdow
 It uses Trafilatura for main content, MarkItDown for document conversion, and
 Selenium/Chrome when JavaScript rendering is needed. No Playwright dependency.
 
-Version 0.8 adds Python 3.14 support, full-page screenshots and worker coverage; 0.7 added
-request correlation ids, browser status in `/health` and a faster auto mode;
+Version 0.9 keeps a page's mathematics - presentation MathML becomes LaTeX, and formulas a
+page hides from sighted readers are no longer dropped - and stops worker teardown from
+blocking the event loop; 0.8 added Python 3.14 support, full-page screenshots and worker
+coverage; 0.7 added request correlation ids, browser status in `/health` and a faster auto
+mode;
 0.6 added Prometheus metrics, background jobs, an optional robots.txt check and
 conditional revalidation; 0.5 added page metadata, an inbound rate limit and faster browser
 jobs; 0.4 closed
@@ -221,6 +224,11 @@ remain overrides. `.env.example` lists all supported settings.
   captures the whole document instead of the viewport, up to 4000 pixels wide and 20000
   pixels high - the page declares its own layout size, and `max_bytes` does not cover a
   screenshot. A larger page is cut and the response carries a warning.
+- `extract_links=true`: `links` with every anchor of an HTML page - the absolute URL, its
+  visible text (or `aria-label`/`title` for icon-only links), whether it stays on the host,
+  and a category: `content`, `nav`, `social`, `auth`, `legal`, `search`, `contact`,
+  `download`, `anchor` or `other`. Repeated targets appear once; `javascript:`, `data:`,
+  `blob:` and `vbscript:` targets are omitted. Off by default.
 - `extract_metadata=true`: `metadata` with title, description, author, publication
   date, site name, canonical URL and `<html lang>` of an HTML page, as the page declares
   them (Trafilatura). An undeclared canonical URL falls back to the final URL, an

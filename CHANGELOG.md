@@ -3,6 +3,59 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## 0.9.0 — 2026-09-20
+
+Findings from [the audit of 20 September 2026](docs/audits/2026-09-20-audit.md) are
+referenced as `B01`-`B24`; [the remediation](docs/audits/2026-09-20-remediation.md)
+records what happened to each one.
+
+### Fixed — a page keeps its mathematics
+
+- Presentation MathML is translated to LaTeX instead of being flattened to its text.
+  Serlo publishes no TeX annotation, so the length of a vector arrived as
+  `$$| a -> | = a 1 2 + a 2 2$$`: the radical gone, the exponents turned into
+  neighbouring digits, and the `$$` fences claiming a precision that was not there (B02).
+- A formula the page hides from sighted readers is unhidden, because extractors drop
+  hidden content. Wikipedia ships its MathML that way, so all 289 formulas of "Satz des
+  Pythagoras" were missing from the extraction; 275 are back, the rest sit in boilerplate
+  the extractor excludes anyway (B03).
+
+### Fixed — the service keeps serving
+
+- Stopping and starting a worker no longer runs on the event loop. Every browser error,
+  deadline and cancellation used to freeze the whole service for as long as `taskkill`,
+  the process join and the profile removal took. Measured with `/health` pinged every
+  20 ms during a browser kill: the worst gap fell from 512-685 ms to 26-40 ms. The unit
+  suite runs in 79 seconds instead of 137 (B01, B06). The pool also has its own threads,
+  so a job cannot queue behind the DNS lookups of a page with many hosts (B07).
+- Recording a request in a `finally` can no longer replace its answer with a 500 when the
+  shared state store is busy or unwritable (B08).
+
+### Changed — review before upgrading
+
+- `failure_reason` names the upstream status first, so a batch item or job result for a
+  404 or 429 reads `Upstream status 429` instead of `Extraction blocked` (B24).
+- `/health` reports whether the configured Chrome and ChromeDriver exist; their paths
+  appear only while no `API_KEY` is set, as with `/docs` (B21).
+- `force_refresh` no longer joins an identical request already in flight, so it always
+  fetches as documented (B12).
+- The service refuses to start on a `DEFAULT_USER_AGENT` that is empty, longer than 512
+  characters or not printable ASCII, instead of answering every crawl with a 500 (B11).
+- The default user agent is `WebsiteTextExtraction/0.9`.
+
+### Fixed — smaller
+
+- robots.txt entries are kept per origin *and* transport: a caller's own proxy or
+  `allow_insecure_ssl` decided what every later robots-respecting request was allowed to
+  crawl, in both directions (B04).
+- A full-page screenshot clamps its width at 4000 pixels as it already clamped the height
+  at 20000; the width came straight from the page's declared layout size (B05).
+- A CONNECT reply without a status line answers 502 instead of aborting the tunnel with an
+  uncaught `IndexError` (B10).
+- A failing store open shuts the storage threads down (B17), and an expired deadline no
+  longer drops an unawaited shield when joining a leader (B18).
+- `extract_links` is documented in the README (B23).
+
 ## 0.8.0 — 2026-09-20
 
 ### Added
