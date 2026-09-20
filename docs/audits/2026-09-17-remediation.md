@@ -48,8 +48,9 @@ answers the same for every entry of the matrix.
   `extract_links` is requested.
 - **Complexity of `_classify_link`, `convert_html`, `embedded_html`, `selenium_fetch`,
   `read_body` (A21).** Left for the next functional change in each, as the audit suggests.
-- **Coverage for spawned workers.** In-process coverage still under-reports worker code;
-  measuring it needs coverage.py's multiprocessing support in the worker entry points.
+- **Coverage for spawned workers.** Closed in 0.8.0: idle workers exit on request instead of
+  being killed, so coverage.py's multiprocessing support can measure them. The suite covers
+  92 % of `app/`, against 81 % counting only the main process.
 - **Live parameter harness.** The 140-case run against real sites still lives outside the
   repository; moving it in as an opt-in job (`RUN_LIVE_TESTS=1`) remains open.
 - **Python 3.14.** Tested and supported since 0.8.0: the unit and real-Chrome suites pass on

@@ -3,6 +3,23 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## 0.8.0 — 2026-09-20
+
+### Added
+
+- Python 3.14 is supported: every declared dependency installs on 3.14.7 and both suites pass
+  there, so `requires-python` allows it and CI covers 3.11 to 3.14. A test keeps the metadata
+  and the CI matrix in step (audit finding A23).
+- `screenshot_full_page=true` captures the whole document instead of the viewport, bounded to
+  20000 pixels; a longer page is cut and says so in its warnings.
+
+### Changed
+
+- An idle worker process is asked to exit and given two seconds before it is killed, so it can
+  flush what it holds. Busy or unresponsive workers, timeouts and cancellations still kill the
+  whole process group. Coverage can therefore measure the spawned workers: 92 % of `app/`
+  against the 81 % that counting only the main process reported.
+
 ## 0.7.0 — 2026-09-20
 
 ### Added
