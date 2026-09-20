@@ -1,9 +1,11 @@
 import asyncio
 import os
+import threading
 import time
 
 import pytest
 
+from app import workers
 from app.capacity import Capacity
 from app.deadline import Deadline
 from app.results import CrawlError
@@ -85,3 +87,53 @@ async def test_capacity_rejects_excess_queue_and_does_not_release_unowned_slot()
             await task
         assert capacity.active == 1 and capacity.waiting == 0
     assert capacity.active == 0
+
+
+async def test_worker_startup_and_teardown_keep_off_the_event_loop(monkeypatch):
+    """taskkill, join and rmtree take seconds; the loop must keep serving other requests."""
+    loop_thread = threading.get_ident()
+    threads = []
+    real_stop, real_slot = workers._stop, workers._Slot
+
+    class RecordingSlot(real_slot):
+        def __init__(self):
+            threads.append(threading.get_ident())
+            super().__init__()
+
+    def recording_stop(slot, graceful=False):
+        threads.append(threading.get_ident())
+        real_stop(slot, graceful)
+
+    monkeypatch.setattr(workers, "_Slot", RecordingSlot)
+    monkeypatch.setattr(workers, "_stop", recording_stop)
+    pool = WorkerPool(1)
+    try:
+        await pool.run(identity, ("one",), Deadline(5))
+        with pytest.raises(CrawlError, match="deadline"):
+            await pool.run(hang, (), Deadline(0.2))
+    finally:
+        await pool.close()
+    assert len(threads) >= 2 and loop_thread not in threads
+
+
+async def test_a_cancellation_while_a_worker_starts_does_not_leak_it(monkeypatch):
+    started = []
+
+    class SlowSlot(workers._Slot):
+        def __init__(self):
+            time.sleep(0.4)  # long enough for the cancellation to arrive mid-startup
+            super().__init__()
+            started.append(self)
+
+    monkeypatch.setattr(workers, "_Slot", SlowSlot)
+    pool = WorkerPool(1)
+    try:
+        task = asyncio.create_task(pool.run(identity, ("one",), Deadline(10)))
+        await asyncio.sleep(0.1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        await pool.close()
+    assert len(started) == 1
+    assert started[0].exitcode is not None  # stopped, not left running

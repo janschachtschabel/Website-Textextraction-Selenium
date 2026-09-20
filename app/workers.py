@@ -12,6 +12,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 
 from loguru import logger
@@ -133,7 +134,40 @@ class WorkerPool:
         self.max_jobs = max_jobs
         self.slots = set()
         self.running = set()
+        self.pending = set()  # worker starts and stops running on those threads
+        # Two threads per slot: a job holds one until its worker answers, and stopping a worker
+        # that never answered needs a second. Own threads, because the loop's shared executor
+        # also resolves every proxied browser connection.
+        self.executor = ThreadPoolExecutor(max_workers=2 * size, thread_name_prefix="extraction-worker")
         self.closed = False
+
+    async def _in_pool(self, function, *args):
+        # A coroutine, so an expired deadline closes it before a worker is handed the job.
+        return await asyncio.wrap_future(self.executor.submit(function, *args))
+
+    def _track(self, future):
+        """Background work close() must not leave behind."""
+        self.pending.add(future)
+        future.add_done_callback(self.pending.discard)
+        return future
+
+    def _retire(self, slot, graceful: bool = False):
+        """Stop a worker off the event loop: taskkill, join and rmtree take seconds."""
+        self.slots.discard(slot)
+        return self._track(self.executor.submit(_stop, slot, graceful))
+
+    async def _started(self):
+        """Start a worker off the loop; a cancellation must not leave the process running."""
+        starting = self._track(self.executor.submit(_Slot))
+        try:
+            return await asyncio.wrap_future(starting)
+        except BaseException:
+            starting.add_done_callback(self._discard_started)
+            raise
+
+    def _discard_started(self, starting):
+        if not starting.cancelled() and starting.exception() is None:
+            self._retire(starting.result(), True)
 
     async def run(self, function, args: tuple, deadline: Deadline):
         if self.closed:
@@ -146,10 +180,10 @@ class WorkerPool:
             slot = await deadline.run(self.idle.get())
             acquired = True
             if slot is None:
-                slot = _Slot()
+                slot = await self._started()
                 self.slots.add(slot)
             try:
-                reply = await deadline.run(asyncio.to_thread(slot.exchange, function, args))
+                reply = await deadline.run(self._in_pool(slot.exchange, function, args))
             except (EOFError, BrokenPipeError, OSError) as exc:
                 raise CrawlError("Worker exited unexpectedly", 503) from exc
             if reply[0] == "error":
@@ -158,15 +192,15 @@ class WorkerPool:
             if slot.jobs >= self.max_jobs:
                 # lxml, MarkItDown and Chrome keep memory that only a new process gives back.
                 retired, slot = slot, None  # the idle queue gets None: the next job starts a worker
-                self.slots.discard(retired)
-                await asyncio.to_thread(_stop, retired, True)  # idle: let it flush and exit
+                await asyncio.wrap_future(self._retire(retired, True))  # idle: let it flush and exit
             return reply[1]
         except BaseException:
             if slot is not None:
                 # Never hand a stopped worker back to the idle queue, even if cleanup fails.
                 dead, slot = slot, None
-                self.slots.discard(dead)
-                _stop(dead)
+                with suppress(asyncio.CancelledError):
+                    # A task being cancelled cannot wait for its own cleanup; close() does.
+                    await asyncio.wrap_future(self._retire(dead))
             raise
         finally:
             if acquired and not self.closed:
@@ -180,9 +214,14 @@ class WorkerPool:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         # Whatever was busy has been cancelled and stopped above; these slots are idle.
-        await asyncio.gather(*(asyncio.to_thread(_stop, slot, True) for slot in self.slots))
-        self.slots.clear()
-        _remove_leftover_directories()
+        for slot in list(self.slots):
+            self._retire(slot, True)
+        # A worker still starting adds its own stop once it is there, so wait until nothing is left.
+        while self.pending:
+            waiting = [asyncio.wrap_future(future) for future in list(self.pending)]
+            await asyncio.gather(*waiting, return_exceptions=True)
+        await self._in_pool(_remove_leftover_directories)
+        self.executor.shutdown(wait=False)
 
     def stats(self):
         return {
