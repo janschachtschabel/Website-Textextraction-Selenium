@@ -52,4 +52,5 @@ answers the same for every entry of the matrix.
   measuring it needs coverage.py's multiprocessing support in the worker entry points.
 - **Live parameter harness.** The 140-case run against real sites still lives outside the
   repository; moving it in as an opt-in job (`RUN_LIVE_TESTS=1`) remains open.
-- **Python 3.14.** Not tested, so the metadata stops below it.
+- **Python 3.14.** Tested and supported since 0.8.0: the unit and real-Chrome suites pass on
+  3.14.7, and CI covers 3.11 to 3.14.

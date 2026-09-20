@@ -15,7 +15,7 @@ extraction, privacy, network safety and resource limits. See the
 
 ## Install and run
 
-Python 3.11 to 3.13 and a local writable cache directory are required. Chrome is
+Python 3.11 to 3.14 and a local writable cache directory are required. Chrome is
 needed only for `mode=js` or an automatic browser fallback. Linux is the primary
 production and CI platform.
 
@@ -295,7 +295,7 @@ python -m build --no-isolation
 RUN_SELENIUM_TESTS=1 pytest -q tests/test_selenium_integration.py
 ```
 
-CI runs unit/API tests on Python 3.11, 3.12 and 3.13 plus a separate real Chrome job.
+CI runs unit/API tests on Python 3.11 to 3.14 plus a separate real Chrome job.
 The browser fixtures in `tests/test_selenium_integration.py` cover dynamic and late
 content, hidden and static progress indicators, a permanent spinner, an empty first
 `<main>`, certificate error pages, downloads, upstream 404, isolated cookies,

@@ -15,7 +15,7 @@ description = "Bounded HTTP-first text extraction with isolated Selenium renderi
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-requires-python = ">=3.11,<3.14"  # 3.11-3.13 run in CI
+requires-python = ">=3.11,<3.15"  # 3.11-3.14 run in CI
 
 dependencies = [
     "fastapi>=0.135.1,<1",
