@@ -137,3 +137,49 @@ async def test_a_cancellation_while_a_worker_starts_does_not_leak_it(monkeypatch
         await pool.close()
     assert len(started) == 1
     assert started[0].exitcode is not None  # stopped, not left running
+
+
+async def test_a_cleanup_that_is_still_queued_survives_a_second_cancellation(monkeypatch):
+    """Cancelling the task again must not cancel the stop it just handed to the pool."""
+    created, stopped, release = [], [], threading.Event()
+    real_slot, real_stop = workers._Slot, workers._stop
+
+    class TrackingSlot(real_slot):
+        def __init__(self):
+            super().__init__()
+            created.append(self)
+
+    def recording_stop(slot, graceful=False):
+        stopped.append(slot)
+        real_stop(slot, graceful)
+
+    monkeypatch.setattr(workers, "_Slot", TrackingSlot)
+    monkeypatch.setattr(workers, "_stop", recording_stop)
+    pool = WorkerPool(1)
+    try:
+        await pool.run(identity, ("warm",), Deadline(5))
+        pool.executor.submit(release.wait)  # the job takes one thread, this the other
+        task = asyncio.create_task(pool.run(hang, (), Deadline(30)))
+        await asyncio.sleep(0.1)
+        task.cancel()
+        while not pool.pending:  # wait for the stop to be queued behind the busy threads
+            await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        release.set()
+        await pool.close()
+        assert stopped == created
+    finally:
+        release.set()
+        for slot in created:
+            if slot.exitcode is None:
+                real_stop(slot)
+
+
+async def test_closing_twice_is_a_no_op():
+    pool = WorkerPool(1)
+    await pool.run(identity, ("one",), Deadline(5))
+    await pool.close()
+    await pool.close()  # the executor is gone; a second close must not submit to it
+    assert pool.stats()["started"] == 0

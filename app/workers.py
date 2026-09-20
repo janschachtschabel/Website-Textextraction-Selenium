@@ -141,6 +141,11 @@ class WorkerPool:
         self.executor = ThreadPoolExecutor(max_workers=2 * size, thread_name_prefix="extraction-worker")
         self.closed = False
 
+    async def _completed(self, future):
+        """Wait for pool work without cancelling it: asyncio.wrap_future chains a cancellation
+        back to the thread pool, which would drop a queued stop and leave its worker running."""
+        return await asyncio.shield(asyncio.wrap_future(future))
+
     async def _in_pool(self, function, *args):
         # A coroutine, so an expired deadline closes it before a worker is handed the job.
         return await asyncio.wrap_future(self.executor.submit(function, *args))
@@ -192,7 +197,7 @@ class WorkerPool:
             if slot.jobs >= self.max_jobs:
                 # lxml, MarkItDown and Chrome keep memory that only a new process gives back.
                 retired, slot = slot, None  # the idle queue gets None: the next job starts a worker
-                await asyncio.wrap_future(self._retire(retired, True))  # idle: let it flush and exit
+                await self._completed(self._retire(retired, True))  # idle: let it flush and exit
             return reply[1]
         except BaseException:
             if slot is not None:
@@ -200,7 +205,7 @@ class WorkerPool:
                 dead, slot = slot, None
                 with suppress(asyncio.CancelledError):
                     # A task being cancelled cannot wait for its own cleanup; close() does.
-                    await asyncio.wrap_future(self._retire(dead))
+                    await self._completed(self._retire(dead))
             raise
         finally:
             if acquired and not self.closed:
@@ -208,6 +213,8 @@ class WorkerPool:
             self.running.discard(task)
 
     async def close(self):
+        if self.closed:
+            return  # closing twice must not submit to an executor that is already gone
         self.closed = True
         tasks = list(self.running)
         for task in tasks:
@@ -218,7 +225,7 @@ class WorkerPool:
             self._retire(slot, True)
         # A worker still starting adds its own stop once it is there, so wait until nothing is left.
         while self.pending:
-            waiting = [asyncio.wrap_future(future) for future in list(self.pending)]
+            waiting = [self._completed(future) for future in list(self.pending)]
             await asyncio.gather(*waiting, return_exceptions=True)
         await self._in_pool(_remove_leftover_directories)
         self.executor.shutdown(wait=False)
