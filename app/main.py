@@ -15,6 +15,7 @@ from .config import settings
 from .inbound_limit import InboundLimit
 from .logging_setup import setup_logging
 from .prometheus import CONTENT_TYPE_LATEST, render
+from .request_id import RequestId
 from .resources import Resources
 from .results import CrawlError
 from .schemas import (
@@ -53,6 +54,7 @@ def create_app(config=settings, resources=None):
         openapi_url=None if config.api_key else "/openapi.json",
     )
     application.add_middleware(BodySizeLimit, max_bytes=config.max_request_bytes)
+    application.add_middleware(RequestId)  # added last, so it runs first and tags every answer
     bearer = HTTPBearer(auto_error=False)
     limit = (
         InboundLimit(config.inbound_rate_limit_rps, config.inbound_rate_limit_burst)

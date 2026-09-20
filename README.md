@@ -49,6 +49,10 @@ every URL, also inside a batch, costs one token from a bucket of
 requests get 429 with `Retry-After`. The bucket is per process and shared by all
 clients; failed authentication never consumes tokens.
 
+Every response carries an `X-Request-ID`: the client's own value when it is a plain token
+of at most 64 characters, otherwise a generated one. Its failure log lines and those of a
+job it started carry the same id.
+
 Every failed crawl is logged as one line with host, mode, upstream status, extraction
 status and elapsed time - never the path or query string. `LOG_JSON=true` emits the
 same fields as JSON and, like the readable sink, without exception variable values.

@@ -9,6 +9,7 @@ from loguru import logger
 from .capacity import Capacity
 from .deadline import Deadline
 from .preflight import blocked_content
+from .request_id import current_request_id
 from .result_cache import make_cache_key
 from .results import CrawlError
 from .robots import RobotsPolicy
@@ -112,13 +113,14 @@ class CrawlService:
         logger.log(
             level,
             "Crawl failed: {reason} (host={host} mode={mode} status={status} "
-            "extraction={extraction} elapsed_ms={elapsed_ms})",
+            "extraction={extraction} elapsed_ms={elapsed_ms} request={request_id})",
             reason=reason,
             host=urlsplit(url).hostname,
             mode=options.mode,
             status=status,
             extraction=extraction,
             elapsed_ms=round((time.monotonic() - started) * 1000),
+            request_id=current_request_id(),
         )
 
     async def _cached(self, url, options, deadline):

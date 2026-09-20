@@ -123,3 +123,22 @@ async def test_a_missing_chrome_binary_is_reported_at_startup_and_in_health(tmp_
         logger.remove(sink)
     assert health["browser"]["chrome_binary_exists"] is False
     assert any("no-chrome-here" in record["message"] for record in records)
+
+
+async def test_failures_and_responses_carry_the_request_id_the_client_sent(api):
+    client, records = api
+    response = await client.post(
+        "/crawl", json={"url": "https://example.com/unreachable"}, headers={"X-Request-ID": "support-case-42"}
+    )
+    assert response.status_code == 502
+    assert response.headers["x-request-id"] == "support-case-42"
+    assert records[0]["extra"]["request_id"] == "support-case-42"
+
+
+async def test_a_generated_id_replaces_one_that_cannot_be_logged(api):
+    client, _ = api
+    sent = "broken id\r\nX-Injected: 1"
+    response = await client.post("/crawl", json={"url": "https://example.com/article"}, headers={"X-Request-ID": sent})
+    returned = response.headers["x-request-id"]
+    assert response.status_code == 200 and returned != sent
+    assert len(returned) == 16 and all(character in "0123456789abcdef" for character in returned)
