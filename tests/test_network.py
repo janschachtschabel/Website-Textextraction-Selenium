@@ -192,3 +192,23 @@ async def test_validators_are_only_sent_to_the_url_that_issued_them():
     assert again.status_code == 304
     # The redirecting origin never sees the other site's ETag.
     assert seen[-2:] == [("/old", None), ("/lesson", '"v1"')]
+
+
+def test_a_long_extraction_answers_routing_without_parsing_the_page_again(monkeypatch, article_html):
+    from app import preflight
+
+    monkeypatch.setattr(preflight, "BeautifulSoup", lambda *args: pytest.fail("The page was parsed a second time"))
+    fetched = FetchResult(
+        (article_html + '<div id="root"></div><script src="app.js"></script>').encode(),
+        "https://example.com",
+        200,
+        "text/html",
+    )
+    extracted = ConversionResult("Reflection changes the direction of light. " * 40, "trafilatura", "ok")
+    assert needs_browser(fetched, extracted) is False
+
+
+def test_image_alt_text_is_not_visible_content_for_that_shortcut():
+    shell = FetchResult(b'<div id="root"></div><script src="app.js"></script>', "https://example.com", 200, "text/html")
+    alt_only = ConversionResult("![" + "Beschreibung eines Bildes " * 60 + "](https://example.com/bild.png)", "bs4", "ok")
+    assert needs_browser(shell, alt_only) is True
