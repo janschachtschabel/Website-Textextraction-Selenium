@@ -210,5 +210,7 @@ def test_a_long_extraction_answers_routing_without_parsing_the_page_again(monkey
 
 def test_image_alt_text_is_not_visible_content_for_that_shortcut():
     shell = FetchResult(b'<div id="root"></div><script src="app.js"></script>', "https://example.com", 200, "text/html")
-    alt_only = ConversionResult("![" + "Beschreibung eines Bildes " * 60 + "](https://example.com/bild.png)", "bs4", "ok")
+    alt_only = ConversionResult(
+        "![" + "Beschreibung eines Bildes " * 60 + "](https://example.com/bild.png)", "bs4", "ok"
+    )
     assert needs_browser(shell, alt_only) is True
