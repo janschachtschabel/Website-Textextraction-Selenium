@@ -43,6 +43,22 @@ records what happened to each one.
   characters or not printable ASCII, instead of answering every crawl with a 500 (B11).
 - The default user agent is `WebsiteTextExtraction/0.9`.
 
+### Fixed — found by reviewing the change set itself
+
+- A cancelled task could cancel the worker stop it had just queued, because
+  `asyncio.wrap_future` chains cancellation back to the thread pool. The worker and its
+  Chrome children survived and the pool eventually stopped serving. Waiting goes through a
+  shield now, and closing a pool twice is a no-op.
+- A page controls the fence attributes of `mfenced`, which were not escaped: `open="$$ ..."`
+  ended the Markdown fence and put arbitrary text outside it.
+- Converting MathML stops at 64 levels of nesting. About 600 nested elements raised
+  `RecursionError` where 0.8.0 took the iterative text path, failing the crawl with a 502.
+- Three smaller formula defects: the escapes for a backslash and a tilde swallowed the next
+  character, a degree sign became a second superscript inside `msup`, and a bracket in a
+  root index closed the optional argument early.
+- Unhiding a formula wrapper stops at an element that holds more than the formula, even a
+  text-free one such as a tracking pixel.
+
 ### Fixed — smaller
 
 - robots.txt entries are kept per origin *and* transport: a caller's own proxy or

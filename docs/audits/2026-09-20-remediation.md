@@ -31,6 +31,29 @@ Partly addressed:
   with many third-party hosts. A DNS cache stays out: measured in 0.7.0 at 0.3–0.9 ms for
   a repeat resolution, because the OS resolver already caches.
 
+## Review round of the change set itself
+
+A second review, with clean context, read `15a9604..e64897e` and found seven defects the
+fixes had introduced. All are corrected in the same release.
+
+| Severity | Defect | Fix | Test |
+|----------|--------|-----|------|
+| high | `asyncio.wrap_future` chains a cancellation back to the thread pool, so a second cancellation - a deadline and `WorkerPool.close()` cancelling the same task - cancelled a `_stop` still queued behind busy threads. The worker and its Chrome children survived, the executor thread blocked in `recv()` was lost, and `close()` had nothing left to wait for. Repeated, the pool stops serving | wait through `asyncio.shield` | `test_a_cleanup_that_is_still_queued_survives_a_second_cancellation` |
+| medium-high | `mfenced` used its `open`/`close` attributes unescaped, although a page controls them: `open="$$ ..."` closed the Markdown fence and put arbitrary text outside it | escape them like every other leaf | `test_a_fence_the_page_declares_cannot_escape_the_formula` |
+| medium | Conversion recursed without a limit, so about 600 nested `mrow` raised `RecursionError` out of `prepare_html` - outside the per-converter fallback - and failed the crawl with 502 | stop at 64 levels and keep the text from there | `test_deeply_nested_markup_does_not_exhaust_the_stack`, `test_a_deeply_nested_formula_does_not_fail_the_conversion` |
+| medium | The escapes for a backslash and a tilde were letter commands with no terminator, so they swallowed the next character | `ackslash{}`, `\sim{}` | `test_an_escape_does_not_swallow_what_follows_it` |
+| medium | A degree sign mapped to `^{\circ}` and became a second superscript inside `msup` | map it to `\circ` | `test_a_degree_sign_does_not_become_a_second_superscript` |
+| low | A `]` in a root index closed the optional argument early | brace an index that contains one | `test_a_bracket_in_a_root_index_stays_inside_it` |
+| low | Unhiding a formula wrapper also revealed text-free siblings, such as a hidden image | stop at an element holding more than the formula | `test_a_hidden_wrapper_holding_more_than_the_formula_keeps_its_styling` |
+
+`WorkerPool.close()` is also a no-op the second time; it used to submit to an executor it
+had just shut down (`test_closing_twice_is_a_no_op`). The review confirmed the in-flight
+bookkeeping in `app/service.py`, the thread safety of the worker sets and the `2 * size`
+thread budget as sound.
+
+After the tightening the three pages the feature exists for are unchanged: Serlo 26
+formulas, "Satz des Pythagoras" 275, "Photosynthese" 34.
+
 ## Deliberately unchanged
 
 - **B09, per-process gauges.** `extraction_ready`, `extraction_active_requests`,
