@@ -1,8 +1,12 @@
 """Cap request bodies before routing: FastAPI reads the whole body before authentication."""
 
+import asyncio
 import json
+from contextlib import suppress
 
 _BODY_METHODS = frozenset({"POST", "PUT", "PATCH"})
+DRAIN_BYTES = 4 * 1024 * 1024  # of a rejected upload, so the client can read the answer
+DRAIN_SECONDS = 1.0
 
 
 def _declared_length(headers) -> int | None:
@@ -37,6 +41,7 @@ class BodySizeLimit:
                 break
             body += message.get("body", b"")
             if len(body) > self.max_bytes:
+                await self._drain(receive)
                 return await self._reject(send)
             if not message.get("more_body", False):
                 break
@@ -46,6 +51,17 @@ class BodySizeLimit:
             return replay.pop(0) if replay else await receive()
 
         await self.app(scope, replayed, send)
+
+    async def _drain(self, receive):
+        """Read a bounded rest of a rejected upload: a client still sending sees a reset, not the 413."""
+        discarded = 0
+        with suppress(TimeoutError):
+            async with asyncio.timeout(DRAIN_SECONDS):
+                while discarded < DRAIN_BYTES:
+                    message = await receive()
+                    if message["type"] != "http.request" or not message.get("more_body", False):
+                        return
+                    discarded += len(message.get("body", b""))
 
     async def _reject(self, send):
         payload = json.dumps({"detail": f"Request body exceeds {self.max_bytes} bytes"}).encode()

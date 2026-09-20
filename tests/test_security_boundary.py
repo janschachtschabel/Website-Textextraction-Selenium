@@ -133,3 +133,57 @@ async def test_streamed_body_is_capped_without_a_content_length():
 async def test_root_advertises_the_docs_only_while_they_exist(key, advertised):
     response = await _request(create_app(replace(LOCAL, api_key=key)), "GET", "/")
     assert response.json()["docs"] == advertised
+
+
+def _upload_scope():
+    return {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/crawl",
+        "raw_path": b"/crawl",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [(b"host", b"test"), (b"content-type", b"application/json")],
+        "client": ("127.0.0.1", 12345),
+        "server": ("test", 80),
+    }
+
+
+async def test_the_rest_of_an_oversized_body_is_read_before_the_error_is_sent():
+    app = create_app(replace(LOCAL, max_request_bytes=1024))
+    remaining = [{"type": "http.request", "body": b"x" * 600, "more_body": True} for _ in range(4)]
+    remaining.append({"type": "http.request", "body": b"x" * 10, "more_body": False})
+    messages = []
+
+    async def receive():
+        return remaining.pop(0) if remaining else {"type": "http.disconnect"}
+
+    async def send(message):
+        messages.append(message)
+
+    await app(_upload_scope(), receive, send)
+    assert remaining == []  # the client could finish sending, so it can read the answer
+    assert messages[0]["status"] == 413
+
+
+async def test_reading_the_rest_of_a_body_stays_bounded():
+    from app.body_limit import DRAIN_BYTES
+
+    app = create_app(replace(LOCAL, max_request_bytes=1024))
+    reads = 0
+    messages = []
+
+    async def receive():  # a client that never stops sending
+        nonlocal reads
+        reads += 1
+        return {"type": "http.request", "body": b"x" * 65536, "more_body": True}
+
+    async def send(message):
+        messages.append(message)
+
+    await app(_upload_scope(), receive, send)
+    assert reads <= DRAIN_BYTES // 65536 + 2
+    assert messages[0]["status"] == 413

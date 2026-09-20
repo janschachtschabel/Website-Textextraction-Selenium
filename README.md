@@ -39,9 +39,9 @@ coalescing counters, a latency histogram of fresh successful extractions, and ga
 for readiness, capacity, worker pools and cache size. The counters live in the shared
 state store, so all Uvicorn workers report one series. Scrape it with
 `authorization: {credentials: <API_KEY>}` in the Prometheus job. Request bodies
-above `MAX_REQUEST_BYTES` (1 MiB) are answered with 413 before authentication and the
-connection is closed, so a client that is still uploading can see the reset instead of
-the response body.
+above `MAX_REQUEST_BYTES` (1 MiB) are answered with 413 before authentication. The rest of
+the upload is read, bounded to 4 MiB and one second, so the client can read the answer
+instead of a connection reset; beyond that the connection is closed.
 
 `INBOUND_RATE_LIMIT_RPS` (off by default) limits crawl requests after authentication:
 every URL, also inside a batch, costs one token from a bucket of
