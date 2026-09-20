@@ -339,3 +339,4 @@ async def test_a_forced_refresh_never_joins_another_request(api):
     assert forced.status_code == 200
     assert forced.json()["coalesced"] is False and forced.json()["cached"] is False
     assert state["calls"] == 2
+    assert not resources.service.inflight  # neither request left the other's entry behind

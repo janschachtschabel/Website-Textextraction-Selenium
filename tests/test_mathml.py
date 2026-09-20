@@ -75,3 +75,30 @@ def test_an_unknown_element_still_yields_the_content_it_wraps():
 
 def test_a_formula_with_nothing_to_convert_is_empty():
     assert to_latex(math("")) == ""
+
+
+def test_a_fence_the_page_declares_cannot_escape_the_formula():
+    """open/close are page-controlled; unescaped they end the $$ fence and inject Markdown."""
+    assert to_latex(math('<mfenced open="$" close="}"><mi>x</mi></mfenced>')) == r"\$x\}"
+    assert to_latex(math("<mfenced><mi>x</mi></mfenced>")) == "(x)"
+
+
+def test_deeply_nested_markup_does_not_exhaust_the_stack():
+    markup = "<mrow>" * 600 + "<mi>x</mi>" + "</mrow>" * 600
+    assert "x" in to_latex(math(markup))
+
+
+@pytest.mark.parametrize(
+    "text, latex",
+    [(chr(92) + "alpha", r"\backslash{}alpha"), ("~x", r"\sim{}x")],
+)
+def test_an_escape_does_not_swallow_what_follows_it(text, latex):
+    assert to_latex(math(f"<mi>{text}</mi>")) == latex
+
+
+def test_a_degree_sign_does_not_become_a_second_superscript():
+    assert to_latex(math("<msup><mn>90</mn><mo>°</mo></msup>")) == r"90^{\circ}"
+
+
+def test_a_bracket_in_a_root_index_stays_inside_it():
+    assert to_latex(math("<mroot><mi>x</mi><mo>]</mo></mroot>")) == r"\sqrt[{]}]{x}"

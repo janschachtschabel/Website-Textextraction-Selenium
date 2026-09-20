@@ -203,3 +203,31 @@ def test_a_hidden_accessibility_wrapper_does_not_swallow_the_formula():
     )
     markdown = trafilatura_markdown(f"<main>{{}}<p>Der Satz lautet {formula}.</p></main>")
     assert "$$a^{2}+b^{2}=c^{2}$$" in markdown
+
+
+def test_a_deeply_nested_formula_does_not_fail_the_conversion():
+    """Nesting is the page's to choose; converting it must not exhaust the stack."""
+    formula = "<math>" + "<mrow>" * 600 + "<mi>x</mi>" + "</mrow>" * 600 + "</math>"
+    markdown = bytes_to_markdown(f"<html><body><p>Es gilt {formula}.</p></body></html>".encode(), "text/html",
+                                 html_converter="bs4")
+    assert "x" in markdown
+
+
+def test_a_hidden_wrapper_is_revealed_for_presentation_markup_too():
+    formula = (
+        '<span class="wrapper" style="display: none;"><math><msqrt><mi>x</mi></msqrt></math></span>'
+    )
+    markdown = trafilatura_markdown(f"<main>{{}}<p>Die Wurzel ist {formula}.</p></main>")
+    assert r"$$\sqrt{x}$$" in markdown
+
+
+def test_a_hidden_wrapper_holding_more_than_the_formula_keeps_its_styling():
+    """Unhiding must not surface what the page hides beside the formula, such as a pixel."""
+    from app.markup import prepare_html
+
+    html = (
+        '<div style="display: none;"><img src="https://tracker.example/pixel.gif">'
+        "<span><math><msqrt><mi>x</mi></msqrt></math></span></div>"
+    )
+    soup = prepare_html(html.encode(), "text/html")
+    assert soup.find("div").get("style") == "display: none;"

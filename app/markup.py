@@ -65,11 +65,15 @@ def _reveal(replacement):
 
     Wikipedia ships its MathML in a ``display: none`` span next to a rendered image, and
     extractors drop hidden content - so the substituted LaTeX would never reach the output.
-    A wrapper holding anything besides the formula keeps its styling.
+    A wrapper holding anything besides the formula keeps its styling: one more element, even
+    a text-free one such as a tracking pixel, ends the walk.
     """
     formula = replacement.string
     for parent in replacement.parents:
-        if parent.name in {"body", "html", "[document]"} or parent.get_text(" ", strip=True) != formula:
+        children = [child for child in parent.children if getattr(child, "name", None)]
+        if parent.name in {"body", "html", "[document]"} or len(children) != 1:
+            return
+        if parent.get_text(" ", strip=True) != formula:
             return
         if _HIDDEN.search(parent.get("style", "")):
             del parent["style"]
