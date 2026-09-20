@@ -65,3 +65,18 @@ def test_group_readable_cache_directory_is_refused(tmp_path):
     resources = Resources(replace(settings, result_cache_dir=str(shared), host="127.0.0.1", api_key=None))
     with pytest.raises(RuntimeError, match="private"):
         resources._open_stores()
+
+
+async def test_a_failed_store_open_shuts_the_storage_threads_down(tmp_path, monkeypatch):
+    """The executor exists before the stores; unwinding must still take it with it."""
+
+    def refuse(self):
+        raise RuntimeError("cache directory unusable")
+
+    monkeypatch.setattr(Resources, "_open_stores", refuse)
+    resources = Resources(replace(settings, result_cache_dir=str(tmp_path), host="127.0.0.1", api_key=None))
+    with pytest.raises(RuntimeError, match="unusable"):
+        async with resources:
+            pytest.fail("Startup must not succeed")
+    with pytest.raises(RuntimeError, match="shutdown"):
+        resources.executor.submit(len, "")

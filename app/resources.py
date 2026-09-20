@@ -70,13 +70,13 @@ class Resources:
     async def _close_stores(self):
         await self.io(self.cache.close)
         await self.io(self.state.close)
-        self.executor.shutdown(wait=True)
 
     async def __aenter__(self):
         self.stack = AsyncExitStack()
         await self.stack.__aenter__()
         try:
             self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="extraction-storage")
+            self.stack.callback(self.executor.shutdown, True)  # registered first: shuts down last
             await self.io(self._open_stores)
             self.stack.push_async_callback(self._close_stores)
             guard = await self.stack.enter_async_context(EgressProxy(protection=self.config.ssrf_protection))
