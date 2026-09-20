@@ -2,7 +2,7 @@
 
 What happened to every finding of [the audit](2026-09-20-audit.md), `B01`–`B24`.
 Released as 0.9.0. Verification for each change is the test named with it; the
-whole set runs as 307 unit tests plus 15 against real Chrome.
+whole set runs as 318 unit tests plus 15 against real Chrome.
 
 ## Fixed
 
@@ -41,7 +41,7 @@ fixes had introduced. All are corrected in the same release.
 | high | `asyncio.wrap_future` chains a cancellation back to the thread pool, so a second cancellation - a deadline and `WorkerPool.close()` cancelling the same task - cancelled a `_stop` still queued behind busy threads. The worker and its Chrome children survived, the executor thread blocked in `recv()` was lost, and `close()` had nothing left to wait for. Repeated, the pool stops serving | wait through `asyncio.shield` | `test_a_cleanup_that_is_still_queued_survives_a_second_cancellation` |
 | medium-high | `mfenced` used its `open`/`close` attributes unescaped, although a page controls them: `open="$$ ..."` closed the Markdown fence and put arbitrary text outside it | escape them like every other leaf | `test_a_fence_the_page_declares_cannot_escape_the_formula` |
 | medium | Conversion recursed without a limit, so about 600 nested `mrow` raised `RecursionError` out of `prepare_html` - outside the per-converter fallback - and failed the crawl with 502 | stop at 64 levels and keep the text from there | `test_deeply_nested_markup_does_not_exhaust_the_stack`, `test_a_deeply_nested_formula_does_not_fail_the_conversion` |
-| medium | The escapes for a backslash and a tilde were letter commands with no terminator, so they swallowed the next character | `ackslash{}`, `\sim{}` | `test_an_escape_does_not_swallow_what_follows_it` |
+| medium | The escapes for a backslash and a tilde were letter commands with no terminator, so they swallowed the next character | `\backslash{}`, `\sim{}` | `test_an_escape_does_not_swallow_what_follows_it` |
 | medium | A degree sign mapped to `^{\circ}` and became a second superscript inside `msup` | map it to `\circ` | `test_a_degree_sign_does_not_become_a_second_superscript` |
 | low | A `]` in a root index closed the optional argument early | brace an index that contains one | `test_a_bracket_in_a_root_index_stays_inside_it` |
 | low | Unhiding a formula wrapper also revealed text-free siblings, such as a hidden image | stop at an element holding more than the formula | `test_a_hidden_wrapper_holding_more_than_the_formula_keeps_its_styling` |
