@@ -142,3 +142,16 @@ async def test_a_generated_id_replaces_one_that_cannot_be_logged(api):
     returned = response.headers["x-request-id"]
     assert response.status_code == 200 and returned != sent
     assert len(returned) == 16 and all(character in "0123456789abcdef" for character in returned)
+
+
+async def test_a_failing_metrics_store_does_not_replace_the_result(api, monkeypatch):
+    """Recording runs in a finally: an exception there would discard the answer."""
+    client, records = api
+
+    def refuse(*args, **kwargs):
+        raise RuntimeError("state store busy")
+
+    monkeypatch.setattr("app.metrics.Metrics._record", refuse)
+    response = await client.post("/crawl", json={"url": "https://example.com/article"})
+    assert response.status_code == 200 and response.json()["success"]
+    assert [record["message"] for record in records] == ["Metrics not recorded (RuntimeError)"]

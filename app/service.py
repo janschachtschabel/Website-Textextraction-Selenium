@@ -62,12 +62,19 @@ class CrawlService:
             self._log_failure(url, options, started, f"{error} ({type(exc).__name__})", 502, level="ERROR")
             raise error from exc
         finally:
-            await self.resources.metrics.record(
+            await self._record(
                 time.monotonic() - started,
                 bool(result and result.success),
                 bool(result and result.cached),
                 bool(result and result.coalesced),
             )
+
+    async def _record(self, elapsed, success, cached=False, coalesced=False):
+        """Recording runs in a finally: a busy or unwritable store must not discard the answer."""
+        try:
+            await self.resources.metrics.record(elapsed, success, cached, coalesced)
+        except Exception as exc:
+            logger.warning("Metrics not recorded ({})", type(exc).__name__)
 
     async def crawl_batch(self, urls, options, max_concurrency) -> BatchCrawlResponse:
         started = time.monotonic()
@@ -102,7 +109,7 @@ class CrawlService:
         except CrawlError as exc:
             if not acquired:
                 # crawl() records the attempt itself; a queue failure never reaches it.
-                await self.resources.metrics.record(time.monotonic() - started, False)
+                await self._record(time.monotonic() - started, False)
             return BatchCrawlItemResult(url=url, success=False, error=str(exc))
         finally:
             if acquired:
@@ -130,13 +137,14 @@ class CrawlService:
             cached = await resources.io(resources.cache.get, key)
             if cached is not None:
                 return CrawlResponse.model_validate(cached).model_copy(update={"cached": True, "coalesced": False})
-        if key in self.inflight:
-            result = await deadline.run(asyncio.shield(self.inflight[key]))
+        if key in self.inflight and not options.force_refresh:
+            result = await deadline.run(self._joined(key))
             return result.model_copy(deep=True, update={"coalesced": True})
         future = asyncio.get_running_loop().create_future()
         # A leader can fail without followers; retrieve the exception in that case too.
         future.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)
-        self.inflight[key] = future
+        # A forced refresh fetches beside the leader rather than displacing it.
+        self.inflight.setdefault(key, future)
         try:
             stale = None
             if self.config.result_cache_ttl and self.config.revalidation_ttl and not options.force_refresh:
@@ -160,7 +168,12 @@ class CrawlService:
             future.set_exception(public_error)
             raise
         finally:
-            self.inflight.pop(key, None)
+            if self.inflight.get(key) is future:
+                del self.inflight[key]
+
+    async def _joined(self, key):
+        # A coroutine, so an expired deadline closes it instead of dropping an unawaited shield.
+        return await asyncio.shield(self.inflight[key])
 
     async def _store(self, key, result, validators):
         resources = self.resources

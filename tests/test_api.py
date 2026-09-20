@@ -319,3 +319,20 @@ async def test_prometheus_metrics_are_cumulative_counters_histogram_and_gauges(a
     assert samples[("extraction_cache_entries", ())] == 1
     assert samples[("extraction_pool_workers", (("pool", "conversion"), ("state", "limit")))] == 1
     assert ("extraction_active_requests", ()) in samples
+
+
+async def test_a_forced_refresh_never_joins_another_request(api):
+    """force_refresh promises an unconditional fetch, so it must not take a leader's answer."""
+    client, state, resources = api
+    payload = {"url": "https://example.com/article"}
+    leader = asyncio.create_task(client.post("/crawl", json=payload))
+    for _ in range(500):  # wait for the leader to be in flight, not for a fixed moment
+        if resources.service.inflight:
+            break
+        await asyncio.sleep(0.002)
+    assert resources.service.inflight
+    forced = await client.post("/crawl", json={**payload, "force_refresh": True})
+    assert (await leader).status_code == 200
+    assert forced.status_code == 200
+    assert forced.json()["coalesced"] is False and forced.json()["cached"] is False
+    assert state["calls"] == 2
