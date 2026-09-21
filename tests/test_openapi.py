@@ -1,0 +1,95 @@
+"""The published schema is the contract, so /docs must offer a request that works.
+
+FastAPI fills an undocumented field with a placeholder for its type. The body that
+"Try it out" offered was therefore url="string" with timeout_ms=0, which the
+validation rejects - and a reader who corrected only the URL crawled the site with
+"User-Agent: string".
+"""
+
+from dataclasses import replace
+
+import pytest
+from pydantic import ValidationError
+
+from app.config import settings
+from app.main import create_app
+from app.schemas import (
+    BatchCrawlItemResult,
+    BatchCrawlRequest,
+    BatchCrawlResponse,
+    CrawlRequest,
+    CrawlResponse,
+    JobAccepted,
+    JobStatus,
+)
+
+# Without a key the service publishes its schema; that is the surface a reader sees.
+SCHEMA = create_app(replace(settings, api_key=None)).openapi()
+GENERATED = {"HTTPValidationError", "ValidationError"}  # FastAPI's own, not ours to write
+OURS = sorted(name for name in SCHEMA["components"]["schemas"] if name not in GENERATED)
+REQUESTS = {"CrawlRequest": CrawlRequest, "BatchCrawlRequest": BatchCrawlRequest}
+RESPONSES = {
+    "CrawlResponse": CrawlResponse,
+    "JobAccepted": JobAccepted,
+    "BatchCrawlItemResult": BatchCrawlItemResult,
+    "BatchCrawlResponse": BatchCrawlResponse,
+    "JobStatus": JobStatus,
+}
+
+
+@pytest.mark.parametrize("name", list(REQUESTS))
+def test_the_documented_example_is_a_request_the_service_accepts(name):
+    examples = SCHEMA["components"]["schemas"][name].get("examples")
+    assert examples, f"{name} publishes no example, so /docs offers type placeholders instead"
+    for example in examples:
+        REQUESTS[name](**example)  # raises if the body /docs offers would be a 422
+
+
+@pytest.mark.parametrize("name", OURS)
+def test_every_field_says_what_it_is_for(name):
+    properties = SCHEMA["components"]["schemas"][name].get("properties", {})
+    undocumented = sorted(field for field, spec in properties.items() if not spec.get("description"))
+    assert not undocumented, f"{name} leaves {len(undocumented)} fields unexplained: {undocumented}"
+
+
+def test_every_endpoint_says_what_it_does():
+    undocumented = [
+        f"{verb.upper()} {path}"
+        for path, operations in SCHEMA["paths"].items()
+        for verb, operation in operations.items()
+        if not operation.get("summary") or not operation.get("description")
+    ]
+    assert not undocumented, f"without a description /docs shows only the function name: {undocumented}"
+
+
+def test_the_service_explains_itself_on_its_front_page():
+    assert SCHEMA["info"].get("description"), "/docs opens on the title alone"
+
+
+def test_a_proxy_that_is_not_a_url_is_rejected():
+    """The placeholder used to be mapped to "no proxy", which hid a typo as well."""
+    with pytest.raises(ValidationError):
+        CrawlRequest(url="https://example.com", proxy="string")
+
+
+@pytest.mark.parametrize("name", list(REQUESTS))
+def test_an_unknown_option_is_still_refused(name):
+    """The example lives in model_config; overriding it must not drop extra="forbid"."""
+    with pytest.raises(ValidationError):
+        REQUESTS[name](**{**SCHEMA["components"]["schemas"][name]["examples"][0], "typo": 1})
+
+
+@pytest.mark.parametrize("name", list(RESPONSES))
+def test_the_documented_answer_is_one_the_service_could_have_given(name):
+    """Without an example /docs shows an answer of "string" and 0 for every field."""
+    examples = SCHEMA["components"]["schemas"][name].get("examples")
+    assert examples, f"{name} publishes no example answer"
+    for example in examples:
+        RESPONSES[name](**example)
+
+
+def test_the_example_answer_counts_its_own_text_correctly():
+    """It was taken from a real crawl; a mangled escape would show up in the length."""
+    example = SCHEMA["components"]["schemas"]["CrawlResponse"]["examples"][0]
+    assert example["markdown_length"] == len(example["markdown"])
+    assert example["word_count"] == len(example["markdown"].split())
