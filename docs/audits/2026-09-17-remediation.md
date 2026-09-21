@@ -52,8 +52,9 @@ on Python 3.13.15.
   reclassifies 287 of 2019 - every in-page anchor becomes a content link, because
   `#cite_ref-26` is no longer a bare fragment. Sharing the tree from before those mutations
   needs a copy per consumer, and on that page `copy.copy` costs 229 ms against 244 ms to
-  parse again: 6 % saved for a change to `convert_document`'s contract for every content
-  type. The second parse stays, and it only happens when `extract_links` is requested.
+  parse again: a second parse 6 % cheaper, 15 ms, for a change to `convert_document`'s
+  contract for every content type. The second parse stays, and it only happens when
+  `extract_links` is requested.
 - **Complexity (A21).** Closed in 2.0.0. `create_app`, which 0.4.0 had brought under the
   threshold, had grown back to 19 because nothing checked it, and five more functions sat
   between 11 and 13. Each was split along a responsibility rather than a line count: the
