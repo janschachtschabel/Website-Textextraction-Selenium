@@ -50,5 +50,8 @@ jobs:
         run: |
           "$CHROME_BINARY" --version
           "$CHROMEDRIVER_PATH" --version
-          timeout 15 "$CHROME_BINARY" --headless --disable-background-networking --dump-dom about:blank
+          # The timeout guards a hang only: a refused sandbox exits at once, with its reason.
+          # Measured 5.6 s and 6.9 s on the runs either side of one that blew past 15 s on a
+          # contended runner - the flaking wall-clock threshold of A25, where A25 never looked.
+          timeout 60 "$CHROME_BINARY" --headless --disable-background-networking --dump-dom about:blank
       - run: pytest -q tests/test_selenium_integration.py
