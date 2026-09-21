@@ -287,4 +287,4 @@ referenced as `A01`–`A25`.
 
 Extraction, privacy, network safety and resource limits were corrected. See
 [docs/migration-0.3.md](docs/migration-0.3.md) for the contract changes and
-[docs/audit-remediation.md](docs/audit-remediation.md) for the findings behind them.
+[the remediation record](docs/audits/2026-09-15-remediation.md) for the findings behind them.

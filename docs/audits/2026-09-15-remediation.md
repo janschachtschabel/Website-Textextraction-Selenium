@@ -82,7 +82,7 @@ weakening the host runtime's security policy. Successful Presidio detection stil
 requires installing the optional models in the target deployment; tests exercise
 the external NLP boundary and fail-closed behavior, not NER accuracy.
 
-See [migration-0.3.md](migration-0.3.md) for intentional API/default changes,
+See [migration-0.3.md](../migration-0.3.md) for intentional API/default changes,
 legacy remote transcription restrictions and rollout/rollback. Limits are
 per-process except the on-host shared cache/rate/metric state. Browser `max_bytes`
 bounds returned HTML, not total asset traffic or a browser's internal memory.
