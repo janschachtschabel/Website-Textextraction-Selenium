@@ -19,6 +19,9 @@ jobs:
           cache: pip
       - run: python -m pip install -e '.[dev,documents,loadtest]'
       - run: ruff check app tests helper/loadtest.py
+      # Formatting was a standard nothing checked, the way complexity was until 2.0.0.
+      # The Colab notebook stays out: its cells are written to be read, not packed.
+      - run: ruff format --check app tests helper/loadtest.py
       - run: pytest -q -m 'not selenium'
       # Once per workflow: the advisory service answers the same for every entry of the
       # matrix, and three parallel runs turn one failed request into a failed build.
