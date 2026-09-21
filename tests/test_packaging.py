@@ -1,4 +1,8 @@
-"""The supported Python versions must be the tested ones (audit finding A23)."""
+"""Guards that the repository's own files agree with each other.
+
+The supported Python versions must be the tested ones (A23), the image must install the
+lockfile it ships, and .env.example must name every setting the service reads.
+"""
 
 import re
 import tomllib
@@ -60,3 +64,13 @@ def test_the_image_installs_from_the_lockfile_and_checks_the_hashes():
     dockerfile = (ROOT / "Dockerfile").read_text("utf-8")
     assert "requirements.lock" in dockerfile, "the image resolves its own versions instead"
     assert "--require-hashes" in dockerfile, "a lockfile whose hashes are not checked proves nothing"
+
+
+def test_the_example_env_names_every_setting_the_service_reads():
+    """.env.example is the operator's reference, and the only one once a key hides /docs."""
+    readers = re.compile(r"(?:os\.getenv|os\.environ\.get|_bool)\(\s*[\"']([A-Z0-9_]+)[\"']")
+    sources = [*sorted((ROOT / "app").rglob("*.py")), ROOT / "run.py"]
+    read = {name for source in sources for name in readers.findall(source.read_text("utf-8"))}
+    read -= {"XDG_CACHE_HOME"}  # freedesktop's own variable; RESULT_CACHE_DIR is the setting for it
+    named = set(re.findall(r"^#?\s*([A-Z0-9_]+)=", (ROOT / ".env.example").read_text("utf-8"), re.M))
+    assert read <= named, f".env.example never names: {sorted(read - named)}"
