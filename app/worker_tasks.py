@@ -33,7 +33,7 @@ def prepare_document(fetched, options, expires_at):
                 metadata = page_metadata(html, fetched.final_url)
             except Exception as exc:  # third-party heuristics on page-controlled text; the text stands
                 converted.warnings.append(f"Page metadata unavailable ({type(exc).__name__})")
-    # Routing parses the document again, and only auto mode can act on the answer.
+    # Only auto mode can act on the answer, and routing parses again only for a thin page.
     use_browser = options.mode == "auto" and needs_browser(fetched, converted)
     return converted, use_browser, links, metadata
 

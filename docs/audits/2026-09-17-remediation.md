@@ -14,7 +14,7 @@ on Python 3.13.15.
 | A04 | `diagnose=True` in the JSON log sink | Fixed: `diagnose`/`backtrace` off | `ecfe566` |
 | A05 | Failed crawls not logged server-side | Fixed: one structured line per failure | `ecfe566` |
 | A06 | Clients can disable the operator rate limit | Fixed: the server default is a ceiling | `063870f` |
-| A07 | No lockfile, no dependency scan in CI | Partly fixed: `constraints.txt` and a `pip-audit` step once per workflow; see follow-ups | `6bdf614`, `f197678`, `d8fc363` |
+| A07 | No lockfile, no dependency scan in CI | Fixed in 2.0.0: `requirements.lock` names a hash for every artefact and the image installs it with `--require-hashes`; `constraints.txt` and a `pip-audit` step per workflow came first | `6bdf614`, `f197678`, `d8fc363`, `4c021c6` |
 | A08 | `links` feature untested | Fixed: 33 cases for extraction and classification | `fa4f82c` |
 | A09 | HTML parsed up to three times | Fixed: routing parse removed outside auto mode, and inside it whenever the extraction proves the page is not a shell | `d56f751`, `ed9dfea` |
 | A10 | Dead helpers contradicting documented behaviour | Fixed: removed, rest moved to `app/links.py` | `1761823` |
@@ -28,7 +28,7 @@ on Python 3.13.15.
 | A18 | Deterministic browser failures retried | Fixed: certificate and policy errors fail at once | `4df44e1` |
 | A19 | Stale lint configuration | Fixed: three obsolete entries removed | `faa9e79` |
 | A20 | Cache format version in two places | Fixed: the directory names the storage layout | `f197678` |
-| A21 | Six functions above complexity 10 | Partly fixed: `create_app` resolved; four unchanged, `read_body` gained one branch for raw deflate | `5635274` |
+| A21 | Six functions above complexity 10 | Fixed in 2.0.0: each split along a responsibility, `read_body` kept at 12 with a reason, and `C90` now gates it; 0.4.0 had resolved `create_app` alone, which then grew back | `5635274`, `75a5b52`, `2d07929` |
 | A22 | Version unchanged after contract changes | Fixed: 0.4.0 with `CHANGELOG.md` | `faa9e79` |
 | A23 | Python support statement inconsistent | Fixed: 3.11-3.13 in metadata, CI and README | `faa9e79` |
 | A24 | README lists fewer browser fixtures than CI runs | Fixed | `faa9e79` |
@@ -36,16 +36,24 @@ on Python 3.13.15.
 
 ## Follow-ups, deliberately not done here
 
-- **Hashed lockfile (A07).** `constraints.txt` records the verified versions, but it has
-  no hashes and was resolved on Windows. A `--require-hashes` lock has to be produced on
-  the target platform, which this repository cannot verify from a Windows checkout. CI
-  still installs the newest compatible releases on purpose, so upstream breakage surfaces
-  early; `pip-audit` gates every build, once per workflow because the advisory service
-answers the same for every entry of the matrix.
-- **One parse per document (A09).** Closed for the routing check in 0.7.0. Sharing the
-  conversion tree with link extraction still requires `convert_document` to hand out its soup,
-  which would change its contract for every content type; that parse only happens when
-  `extract_links` is requested.
+- **Hashed lockfile (A07).** Closed in 2.0.0. `requirements.lock` pins every direct and
+  transitive dependency and names a hash for every artefact, and the image installs it with
+  `--require-hashes`. It stayed open this long because such a lock has to be resolved on the
+  target platform and this repository is developed on Windows; the container added in 0.10.0
+  is that platform. `constraints.txt` keeps its own job, the version set for development
+  installs on any platform, without hashes. CI still installs the newest compatible releases
+  on purpose, so upstream breakage surfaces early; `pip-audit` gates every build, once per
+  workflow because the advisory service answers the same for every entry of the matrix.
+- **One parse per document (A09).** Closed in 2.0.0 by measuring it rather than changing it.
+  The routing parse went in 0.7.0. What remained was sharing conversion's tree with link
+  extraction, and that tree is not one link extraction may read: `_prepared` makes every
+  `href` absolute, decomposes `template`, and can replace the document with an embedded
+  payload. Taking the links from it instead, on the 942 KiB "Photosynthesis" article,
+  reclassifies 287 of 2019 - every in-page anchor becomes a content link, because
+  `#cite_ref-26` is no longer a bare fragment. Sharing the tree from before those mutations
+  needs a copy per consumer, and on that page `copy.copy` costs 229 ms against 244 ms to
+  parse again: 6 % saved for a change to `convert_document`'s contract for every content
+  type. The second parse stays, and it only happens when `extract_links` is requested.
 - **Complexity (A21).** Closed in 2.0.0. `create_app`, which 0.4.0 had brought under the
   threshold, had grown back to 19 because nothing checked it, and five more functions sat
   between 11 and 13. Each was split along a responsibility rather than a line count: the
