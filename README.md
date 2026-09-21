@@ -4,9 +4,11 @@ An HTTP-first FastAPI service that extracts web pages and documents into Markdow
 It uses Trafilatura for main content, MarkItDown for document conversion, and
 Selenium/Chrome when JavaScript rendering is needed. No Playwright dependency.
 
-Version 0.10 makes the request surface readable - every field of every model says what it
-is for, and `/docs` offers a request that works instead of a body of `"string"` - and ships
-a Debian 13 image with Chromium; 0.9 kept a page's mathematics, turning presentation MathML
+Version 2.0 is the rework of the `v1.0.0` this repository carried in March, renumbered to
+stop that tag from presenting pre-audit code as the latest release; it is not compatible
+with it. It installs a hash-checked dependency set in a Debian 13 image with Chromium, and
+`/docs` names every field and offers a request that works instead of a body of `"string"`.
+Along the way: 0.9 kept a page's mathematics, turning presentation MathML
 into LaTeX and no longer dropping formulas a page hides from sighted readers, and stopped
 worker teardown from blocking the event loop; 0.8 added Python 3.14 support, full-page screenshots and worker
 coverage; 0.7 added request correlation ids, browser status in `/health` and a faster auto

@@ -3,7 +3,18 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
-## 0.10.1 - 2026-09-21
+## 2.0.0 - 2026-09-21
+
+The number jumps because it had been going backwards. This repository was tagged `v1.0.0`
+in March; the rework that followed restarted the in-code version at 0.3.0, so the tag and
+the GitHub release still presented the pre-audit code as the latest thing here. 2.0.0 puts
+the line back in order and says what is true of it: the service is **not** compatible with
+1.0.0. An API key is required to bind beyond loopback, `/docs` is withheld once one is set,
+the result cache has a different format and the response schema has changed.
+
+Everything released as 0.3.0 through 0.10.0 is part of this release; those entries record
+how it got here. What follows is what changed since 0.10.0.
+
 
 ### Changed - the image installs a locked, hash-checked dependency set
 
