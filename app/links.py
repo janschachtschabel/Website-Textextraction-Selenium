@@ -125,55 +125,47 @@ def _is_internal(link: str, base_url: str) -> bool:
         return False
 
 
+# Checked in this order; the first pattern that matches names the category.
+_URL_PATTERNS = ((_RE_LEGAL, "legal"), (_RE_AUTH, "auth"), (_RE_SEARCH, "search"), (_RE_CONTACT, "contact"))
+
+
+def _scheme_category(url: str, raw_href: str) -> str | None:
+    """The categories that follow from the scheme alone, before anything is parsed."""
+    if raw_href.startswith("#"):  # an in-page fragment, which the absolute URL no longer shows
+        return "anchor"
+    if url.startswith(("mailto:", "tel:")):
+        return "contact"
+    if any(url.startswith(scheme) for scheme in _SKIP_SCHEMES):
+        return "other"
+    return None
+
+
+def _host_and_path(url: str) -> tuple[str, str]:
+    try:
+        parsed = urlparse(url)
+        return parsed.hostname or "", parsed.path
+    except Exception:
+        return "", ""
+
+
 def _classify_link(absolute_url: str, raw_href: str, text: str | None) -> str:
     """Classify a link given its absolute URL, original href, and visible text."""
-    # In-page fragment anchors (original href begins with #)
-    if raw_href.startswith("#"):
-        return "anchor"
-
-    u = absolute_url.lower()
-
-    # mailto / tel → contact
-    if u.startswith(("mailto:", "tel:")):
-        return "contact"
-
-    # Non-navigable schemes
-    if any(u.startswith(s) for s in _SKIP_SCHEMES):
-        return "other"
-
-    try:
-        parsed = urlparse(u)
-        host = parsed.hostname or ""
-        path = parsed.path
-    except Exception:
-        host = ""
-        path = ""
-
+    url = absolute_url.lower()
+    by_scheme = _scheme_category(url, raw_href)
+    if by_scheme:
+        return by_scheme
+    host, path = _host_and_path(url)
     # Social domains: exact match or any subdomain (e.g. www.twitter.com)
-    if any(host == d or host.endswith("." + d) for d in SOCIAL_DOMAINS):
+    if any(host == domain or host.endswith("." + domain) for domain in SOCIAL_DOMAINS):
         return "social"
-
-    # Path/query-based classification
-    if _RE_LEGAL.search(u):
-        return "legal"
-    if _RE_AUTH.search(u):
-        return "auth"
-    if _RE_SEARCH.search(u):
-        return "search"
-    if _RE_CONTACT.search(u):
-        return "contact"
-
-    # Download by file extension (path already stripped of query/fragment by urlparse)
-    pl = path.lower()
-    if any(pl.endswith(ext) for ext in DOWNLOAD_EXTS):
+    for pattern, category in _URL_PATTERNS:
+        if pattern.search(url):
+            return category
+    # Download by file extension; urlparse already stripped the query and fragment.
+    if any(path.endswith(extension) for extension in DOWNLOAD_EXTS):
         return "download"
-
-    # Nav heuristics via visible link text
-    if text:
-        t = " ".join(text.split()).lower()
-        if t in _NAV_TEXTS:
-            return "nav"
-
+    if text and " ".join(text.split()).lower() in _NAV_TEXTS:
+        return "nav"
     return "content"
 
 

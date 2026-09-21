@@ -70,35 +70,41 @@ def main_frame(driver, events):
     return frame
 
 
+def _configure(driver, options, deadline):
+    """Bound the browser before it loads anything: deadlines, no local schemes, no downloads.
+
+    The speed strategy also drops images, fonts and media, which it can only do when no
+    screenshot is wanted - a picture of a page without its images is worth little.
+    """
+    driver.set_page_load_timeout(deadline.remaining())
+    driver.set_script_timeout(min(10, deadline.remaining()))
+    driver.execute_cdp_cmd("Network.enable", {})
+    blocked = ["file://*", "ftp://*"]
+    driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": blocked})
+    driver.execute_cdp_cmd("Browser.setDownloadBehavior", {"behavior": "deny"})
+    if options.js_strategy == "speed" and not options.screenshot:
+        heavy = ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.woff", "*.woff2", "*.mp4", "*.mp3"]
+        driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": blocked + heavy})
+
+
+def _rendered_html(driver, max_bytes):
+    """The document as the browser now holds it, bounded before it crosses the wire."""
+    driver.execute_script(CAPTURE_MATH)
+    snapshot = driver.execute_script(
+        "const html = document.documentElement.outerHTML; "
+        "return {html: html.slice(0, arguments[0]), truncated: html.length > arguments[0]};",
+        max_bytes,
+    )
+    data = snapshot["html"].encode("utf-8")
+    return data, snapshot["truncated"] or len(data) > max_bytes
+
+
 def selenium_fetch(url, options, proxy_url, expires_at):
     deadline = Deadline.at(expires_at)
     driver = None
     try:
         driver = create_driver(options, proxy_url)
-        driver.set_page_load_timeout(deadline.remaining())
-        driver.set_script_timeout(min(10, deadline.remaining()))
-        driver.execute_cdp_cmd("Network.enable", {})
-        driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": ["file://*", "ftp://*"]})
-        driver.execute_cdp_cmd("Browser.setDownloadBehavior", {"behavior": "deny"})
-        if options.js_strategy == "speed" and not options.screenshot:
-            driver.execute_cdp_cmd(
-                "Network.setBlockedURLs",
-                {
-                    "urls": [
-                        "file://*",
-                        "ftp://*",
-                        "*.png",
-                        "*.jpg",
-                        "*.jpeg",
-                        "*.gif",
-                        "*.webp",
-                        "*.woff",
-                        "*.woff2",
-                        "*.mp4",
-                        "*.mp3",
-                    ]
-                },
-            )
+        _configure(driver, options, deadline)
         driver.get(url)
         events = driver.get_log("performance")
         frame = main_frame(driver, events)
@@ -112,14 +118,7 @@ def selenium_fetch(url, options, proxy_url, expires_at):
         warnings = []
         page = web_url(frame["url"])
         if page:
-            driver.execute_script(CAPTURE_MATH)
-            snapshot = driver.execute_script(
-                "const html = document.documentElement.outerHTML; "
-                "return {html: html.slice(0, arguments[0]), truncated: html.length > arguments[0]};",
-                options.max_bytes,
-            )
-            data = snapshot["html"].encode("utf-8")
-            truncated = snapshot["truncated"] or len(data) > options.max_bytes
+            data, truncated = _rendered_html(driver, options.max_bytes)
         else:
             data, truncated = b"", False  # Chrome's own page is never content
             if status is None or status < 400:

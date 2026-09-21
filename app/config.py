@@ -32,6 +32,32 @@ def _bool(name: str, default: bool) -> bool:
     return value.lower() in {"1", "true", "yes", "on"}
 
 
+# Settings whose value is a count: anything below one disables the thing it sizes.
+_POSITIVE = (
+    "selenium_max_pool_size",
+    "conversion_workers",
+    "worker_max_jobs",
+    "max_active_jobs",
+    "job_result_ttl",
+    "http_max_connections",
+    "max_concurrent_requests",
+    "queue_timeout_seconds",
+    "uvicorn_workers",
+    "result_cache_max_size",
+)
+_CHOICES = {
+    "default_mode": {"auto", "fast", "js"},
+    "default_js_strategy": {"accuracy", "speed"},
+    "html_converter": {"trafilatura", "markitdown", "bs4"},
+    "media_conversion_policy": {"skip", "none", "metadata", "full"},
+}
+
+
+def _printable(value: str) -> bool:
+    """A header value the service may send: printable ASCII, so no injected line break."""
+    return all(32 <= ord(character) <= 126 for character in value)
+
+
 @dataclass(frozen=True)
 class Settings:
     host: str = os.getenv("HOST", "127.0.0.1")
@@ -80,20 +106,22 @@ class Settings:
     inbound_rate_limit_burst: int = int(os.getenv("INBOUND_RATE_LIMIT_BURST", "20"))
 
     def __post_init__(self):
-        for name in (
-            "selenium_max_pool_size",
-            "conversion_workers",
-            "worker_max_jobs",
-            "max_active_jobs",
-            "job_result_ttl",
-            "http_max_connections",
-            "max_concurrent_requests",
-            "queue_timeout_seconds",
-            "uvicorn_workers",
-            "result_cache_max_size",
-        ):
+        self._check_counts()
+        self._check_limits()
+        self._check_headers()
+        # An unauthenticated service on a reachable address is a crawling proxy for anyone who finds it.
+        if not self.api_key and not _is_loopback(self.host):
+            raise ValueError("Set API_KEY before binding HOST to a non-loopback address")
+
+    def _check_counts(self):
+        for name in _POSITIVE:
             if getattr(self, name) < 1:
                 raise ValueError(f"{name} must be positive")
+        for name, choices in _CHOICES.items():
+            if getattr(self, name) not in choices:
+                raise ValueError(f"Invalid {name}")
+
+    def _check_limits(self):
         if not 1 <= self.default_timeout_seconds <= 600:
             raise ValueError("DEFAULT_TIMEOUT_SECONDS must be 1..600")
         if not 0 <= self.default_retries <= 10 or not 1024 <= self.default_max_bytes <= 100 * 1024 * 1024:
@@ -109,30 +137,17 @@ class Settings:
             < 0
         ):
             raise ValueError("Queue size, TTL and rates cannot be negative")
-        for name, choices in {
-            "default_mode": {"auto", "fast", "js"},
-            "default_js_strategy": {"accuracy", "speed"},
-            "html_converter": {"trafilatura", "markitdown", "bs4"},
-            "media_conversion_policy": {"skip", "none", "metadata", "full"},
-        }.items():
-            if getattr(self, name) not in choices:
-                raise ValueError(f"Invalid {name}")
         if not 1024 <= self.max_request_bytes <= 100 * 1024 * 1024:
             raise ValueError("MAX_REQUEST_BYTES must be 1024..104857600")
-        # resolve_options hands these to every request; an invalid value would be a 500 per crawl.
-        if not 1 <= len(self.default_user_agent) <= 512 or any(
-            ord(c) < 32 or ord(c) > 126 for c in self.default_user_agent
-        ):
-            raise ValueError("DEFAULT_USER_AGENT must be printable ASCII, 1 to 512 characters")
-        if len(self.default_accept_language) > 256 or any(
-            ord(c) < 32 or ord(c) > 126 for c in self.default_accept_language
-        ):
-            raise ValueError("DEFAULT_ACCEPT_LANGUAGE must be printable ASCII, at most 256 characters")
         if self.inbound_rate_limit_rps < 0 or self.inbound_rate_limit_burst < 1:
             raise ValueError("INBOUND_RATE_LIMIT_RPS must be >= 0 and INBOUND_RATE_LIMIT_BURST >= 1")
-        # An unauthenticated service on a reachable address is a crawling proxy for anyone who finds it.
-        if not self.api_key and not _is_loopback(self.host):
-            raise ValueError("Set API_KEY before binding HOST to a non-loopback address")
+
+    def _check_headers(self):
+        # resolve_options hands these to every request; an invalid value would be a 500 per crawl.
+        if not 1 <= len(self.default_user_agent) <= 512 or not _printable(self.default_user_agent):
+            raise ValueError("DEFAULT_USER_AGENT must be printable ASCII, 1 to 512 characters")
+        if len(self.default_accept_language) > 256 or not _printable(self.default_accept_language):
+            raise ValueError("DEFAULT_ACCEPT_LANGUAGE must be printable ASCII, at most 256 characters")
 
 
 settings = Settings()

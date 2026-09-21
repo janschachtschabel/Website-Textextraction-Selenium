@@ -56,9 +56,10 @@ def with_heading(text: str | None, heading: str) -> str | None:
     return text
 
 
-def convert_html(
-    data: bytes, content_type: str | None, url: str | None, converter: str, clean: bool
-) -> ConversionResult:
+def _prepared(data: bytes, content_type: str | None, url: str | None, converter: str):
+    """The document the converters see: any embedded payload unwrapped, non-content tags
+    gone and every reference absolute. Returns the converter to start from, which an
+    embedded payload may change."""
     soup = prepare_html(data, content_type)
     embedded = embedded_html(soup, url)
     if embedded:
@@ -75,6 +76,34 @@ def convert_html(
         for attribute in ("href", "src"):
             if tag.get(attribute):
                 tag[attribute] = urljoin(base, tag[attribute])
+    return soup, converter
+
+
+def _attempt(candidate: str, html: str, url: str | None, heading: str, clean: bool) -> str | None:
+    """One converter's turn. Whatever it raises is the caller's to record."""
+    if candidate == "trafilatura":
+        if not clean:
+            return html2txt(html)
+        return with_heading(
+            extract(
+                html,
+                url=url,
+                output_format="markdown",
+                include_links=True,
+                include_tables=True,
+                include_comments=False,
+            ),
+            heading,
+        )
+    if candidate == "markitdown":
+        return markitdown_stream(html.encode(), "text/html; charset=utf-8", ".html", url)
+    return BeautifulSoup(html, "lxml").get_text("\n", strip=True)
+
+
+def convert_html(
+    data: bytes, content_type: str | None, url: str | None, converter: str, clean: bool
+) -> ConversionResult:
+    soup, converter = _prepared(data, content_type, url, converter)
     if not soup.get_text(" ", strip=True):
         return ConversionResult()
     html = str(soup)
@@ -83,26 +112,7 @@ def convert_html(
     candidates = [converter] + (["markitdown", "bs4"] if converter == "trafilatura" else ["bs4"])
     for candidate in dict.fromkeys(candidates):
         try:
-            if candidate == "trafilatura":
-                text = (
-                    with_heading(
-                        extract(
-                            html,
-                            url=url,
-                            output_format="markdown",
-                            include_links=True,
-                            include_tables=True,
-                            include_comments=False,
-                        ),
-                        heading,
-                    )
-                    if clean
-                    else html2txt(html)
-                )
-            elif candidate == "markitdown":
-                text = markitdown_stream(html.encode(), "text/html; charset=utf-8", ".html", url)
-            else:
-                text = BeautifulSoup(html, "lxml").get_text("\n", strip=True)
+            text = _attempt(candidate, html, url, heading, clean)
         except Exception as exc:
             warnings.append(f"{candidate} failed ({type(exc).__name__}); trying fallback")
             continue

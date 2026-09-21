@@ -11,7 +11,11 @@ def _deflate_wbits(head: bytes) -> int:
     return 15 if wrapped else -15
 
 
-async def read_body(response, limit: int) -> tuple[bytes, bool]:
+# Complexity 12, deliberately: every branch belongs to the one job of reading a bounded
+# body - the encoding check, wrapped against raw deflate, the wire and output limits,
+# concatenated gzip members, completeness. Splitting it would scatter state that the
+# loop carries, in code whose whole point is to bound a decompression bomb.
+async def read_body(response, limit: int) -> tuple[bytes, bool]:  # noqa: C901
     # An injected transport may hand us an already-consumed response.
     if response.is_stream_consumed:
         return response.content[:limit], len(response.content) > limit

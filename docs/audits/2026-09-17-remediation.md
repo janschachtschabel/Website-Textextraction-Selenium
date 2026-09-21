@@ -46,8 +46,16 @@ answers the same for every entry of the matrix.
   conversion tree with link extraction still requires `convert_document` to hand out its soup,
   which would change its contract for every content type; that parse only happens when
   `extract_links` is requested.
-- **Complexity of `_classify_link`, `convert_html`, `embedded_html`, `selenium_fetch`,
-  `read_body` (A21).** Left for the next functional change in each, as the audit suggests.
+- **Complexity (A21).** Closed in 2.0.0. `create_app`, which 0.4.0 had brought under the
+  threshold, had grown back to 19 because nothing checked it, and five more functions sat
+  between 11 and 13. Each was split along a responsibility rather than a line count: the
+  routes into four groups by concern, the settings validation into counts, limits and
+  headers, the link classifier into scheme rules and an ordered pattern table, the embedded
+  payload's attachment handling into its own function, the converter chain away from
+  document preparation, and the browser's CDP setup away from reading the page.
+  `read_body` stays at 12 with a `# noqa` and a reason: its branches are one job, and it is
+  the code that bounds a decompression bomb. `C90` is now part of `ruff check` with
+  `max-complexity = 10`, so this cannot creep back unnoticed a second time.
 - **Coverage for spawned workers.** Closed in 0.8.0: idle workers exit on request instead of
   being killed, so coverage.py's multiprocessing support can measure them. The suite covers
   92 % of `app/`, against 81 % counting only the main process.
