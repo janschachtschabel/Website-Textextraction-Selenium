@@ -3,6 +3,42 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## 2.1.0 - 2026-09-21
+
+### Added - a published image, and a compose file a panel can actually deploy
+
+`docker-compose.yml` could only ever be used one way: clone the repository and build. A
+panel that deploys from the URL of a compose file - Hostinger's Docker Manager, Portainer,
+Coolify - fetches that one file and pulls the images it names, so it failed twice over. It
+named `build: .` with no context to build from, and `image: website-textextraction:latest`,
+a local tag that resolved to `docker.io/library/website-textextraction` and does not exist.
+Before either mattered it aborted on `${API_KEY:?set API_KEY in .env}`, which is resolved
+when compose reads the file and cannot be answered by a panel variable, with a message
+asking for a file the operator has no way to create.
+
+- The image is published to Docker Hub as `janschachtschabel/website-textextraction`, built
+  and pushed by `.github/workflows/publish.yml` on a `v*` tag. The workflow refuses a tag
+  that disagrees with `__version__`, and starts the image and crawls a page through Chrome
+  before pushing it, so a broken image is never published.
+- `docker-compose.yml` now pulls that image at a pinned version, names no build, and leaves
+  `API_KEY` to the container's own environment, where a panel puts it. It resolves with no
+  variables set at all; a missing key then fails in the container log rather than before
+  anything starts.
+- `docker-compose.override.yml` is committed and merged automatically in a checkout, where
+  it restores the build and the `.env` key. So a clone still runs its working tree, and the
+  file a panel fetches stays deployable.
+
+### Changed - where the port is published
+
+- The published port follows `BIND_ADDRESS`, which `.env.example` sets to `127.0.0.1`. The
+  compose file fetched on its own publishes on `0.0.0.0`, because the deployment that
+  cannot configure anything is the one that has to be reachable. What is published is
+  authenticated either way: the service binds `0.0.0.0` inside the container and refuses to
+  start without a key.
+- **Upgrading:** an existing `.env` that only holds `API_KEY`, as the previous README told
+  you to write, has no `BIND_ADDRESS` and so now publishes on all interfaces instead of
+  loopback. Add `BIND_ADDRESS=127.0.0.1` to it, or copy `.env.example` again.
+
 ## 2.0.0 - 2026-09-21
 
 The number jumps because it had been going backwards. This repository was tagged `v1.0.0`

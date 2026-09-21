@@ -4,10 +4,12 @@ An HTTP-first FastAPI service that extracts web pages and documents into Markdow
 It uses Trafilatura for main content, MarkItDown for document conversion, and
 Selenium/Chrome when JavaScript rendering is needed. No Playwright dependency.
 
-Version 2.0 is the rework of the `v1.0.0` this repository carried in March, renumbered to
+Version 2 is the rework of the `v1.0.0` this repository carried in March, renumbered to
 stop that tag from presenting pre-audit code as the latest release; it is not compatible
-with it. It installs a hash-checked dependency set in a Debian 13 image with Chromium, and
+with it. 2.0 installs a hash-checked dependency set in a Debian 13 image with Chromium, and
 `/docs` names every field and offers a request that works instead of a body of `"string"`.
+2.1 publishes that image, so a panel that deploys from the URL of a compose file can run
+this service without a checkout.
 Along the way: 0.9 kept a page's mathematics, turning presentation MathML into LaTeX and
 no longer dropping formulas a page hides from sighted readers, and stopped worker teardown
 from blocking the event loop; 0.8 added Python 3.14 support, full-page screenshots and
@@ -123,9 +125,13 @@ sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plug
 git clone https://github.com/janschachtschabel/Website-Textextraction-Selenium.git
 cd Website-Textextraction-Selenium
 API_KEY=$(openssl rand -hex 24)
-echo "API_KEY=$API_KEY" > .env
+cp .env.example .env
+echo "API_KEY=$API_KEY" >> .env
 sudo docker compose up -d --build
 ```
+
+In a checkout, `docker-compose.override.yml` is merged in automatically: it adds the build,
+so this runs the working tree rather than the published image.
 
 `API_KEY` is required. The container binds to `0.0.0.0`, and the service refuses any
 non-loopback address without a key, so a missing one stops the stack before it starts
@@ -133,8 +139,9 @@ rather than exposing an open crawler. The key is passed at run time and never en
 image. Because a key is set, `/docs` is not published - read the schema from a local
 keyless run, as under "Install and run".
 
+`.env.example` sets `BIND_ADDRESS=127.0.0.1`, so the port is published on loopback.
 Port 8000 is crowded on most machines; `HOST_PORT=8188 docker compose up -d` moves the
-published port without editing the file. The service always listens on 8000 inside.
+published port without editing a file. The service always listens on 8000 inside.
 
 ### Check it
 
@@ -166,8 +173,38 @@ trying: it proves Chrome starts inside the container.
   startup until the host directory is owned by uid 10001 with mode 0700.
 - **`init: true`.** Chrome forks helpers that outlive a crash; without an init process to
   reap them they accumulate as zombies. Use `docker run --init` outside compose.
-- **The port is bound to `127.0.0.1`.** Put a reverse proxy in front for anything else;
+- **The published port follows `BIND_ADDRESS`.** A checkout sets `127.0.0.1` through
+  `.env.example`; the compose file fetched on its own publishes on `0.0.0.0`, because the
+  deployment that cannot set anything is the one that has to be reachable. What is
+  published is authenticated either way: the service binds `0.0.0.0` inside the container
+  and so always requires a key. Put a reverse proxy in front for TLS and per-IP limits;
   `deploy/nginx.conf` is a starting point with the rate limits this service expects.
+
+### Deploy from a panel, without a checkout
+
+Hostinger's Docker Manager, Portainer and Coolify all take the URL of a compose file and
+deploy it. They fetch that one file and pull the images it names - there is no checkout,
+so nothing may need a build context:
+
+```
+https://raw.githubusercontent.com/janschachtschabel/Website-Textextraction-Selenium/main/docker-compose.yml
+```
+
+Add one environment variable in the panel, `API_KEY`, with a value of your own. That is
+all: `docker-compose.yml` pulls a published image, names no build, and leaves `API_KEY` to
+the container's own environment so the panel's value is what arrives.
+
+Two things are worth knowing. The panel's variables reach the *container*; compose
+substitution is a separate step that a panel does not fill, which is why this file works
+with no variables set at all and fails in the container log - "Set API_KEY before binding
+HOST to a non-loopback address" - rather than before anything starts. And the image is
+pinned to a version rather than `latest`, so an unattended pull never changes what runs;
+update by editing the tag, or point the panel at a tag of this repository instead of
+`main`.
+
+The image is `janschachtschabel/website-textextraction` on Docker Hub, built and pushed by
+`.github/workflows/publish.yml` when a `v*` tag is pushed. It is smoke-tested before it is
+pushed: the workflow starts it, calls `/health`, and crawls a page through Chrome.
 
 ### Refreshing the lockfile
 
