@@ -8,18 +8,16 @@ Version 2.0 is the rework of the `v1.0.0` this repository carried in March, renu
 stop that tag from presenting pre-audit code as the latest release; it is not compatible
 with it. It installs a hash-checked dependency set in a Debian 13 image with Chromium, and
 `/docs` names every field and offers a request that works instead of a body of `"string"`.
-Along the way: 0.9 kept a page's mathematics, turning presentation MathML
-into LaTeX and no longer dropping formulas a page hides from sighted readers, and stopped
-worker teardown from blocking the event loop; 0.8 added Python 3.14 support, full-page screenshots and worker
-coverage; 0.7 added request correlation ids, browser status in `/health` and a faster auto
-mode;
-0.6 added Prometheus metrics, background jobs, an optional robots.txt check and
-conditional revalidation; 0.5 added page metadata, an inbound rate limit and faster browser
-jobs; 0.4 closed
-the exposure gaps found in the September 2026 audit; 0.3 corrected
-extraction, privacy, network safety and resource limits. See the
-[changelog](CHANGELOG.md), the [migration notes](docs/migration-0.3.md) and the
-[audit remediation record](docs/audit-remediation.md).
+Along the way: 0.9 kept a page's mathematics, turning presentation MathML into LaTeX and
+no longer dropping formulas a page hides from sighted readers, and stopped worker teardown
+from blocking the event loop; 0.8 added Python 3.14 support, full-page screenshots and
+worker coverage; 0.7 added request correlation ids, browser status in `/health` and a
+faster auto mode; 0.6 added Prometheus metrics, background jobs, an optional robots.txt
+check and conditional revalidation; 0.5 added page metadata, an inbound rate limit and
+faster browser jobs; 0.4 closed the exposure gaps found in the September 2026 audit; 0.3
+corrected extraction, privacy, network safety and resource limits. See the
+[changelog](CHANGELOG.md) for the contract per release, and [docs/](docs/README.md) for the
+migration notes and what each audit found.
 
 ## Install and run
 
@@ -124,7 +122,8 @@ sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plug
 ```bash
 git clone https://github.com/janschachtschabel/Website-Textextraction-Selenium.git
 cd Website-Textextraction-Selenium
-echo "API_KEY=$(openssl rand -hex 24)" > .env
+API_KEY=$(openssl rand -hex 24)
+echo "API_KEY=$API_KEY" > .env
 sudo docker compose up -d --build
 ```
 
@@ -140,13 +139,16 @@ published port without editing the file. The service always listens on 8000 insi
 ### Check it
 
 ```bash
+API_KEY=$(grep -E '^API_KEY=' .env | cut -d= -f2)   # only needed in a fresh shell
 curl -s localhost:8000/health
 curl -s -X POST localhost:8000/crawl \
   -H "authorization: Bearer $API_KEY" -H 'content-type: application/json' \
   -d '{"url": "https://example.com", "mode": "js"}'
 ```
 
-`mode=js` is the one worth trying: it proves Chrome starts inside the container.
+The key lives in `.env`, not in the environment, so a shell that did not just create it
+has to read it back; without that the request answers 401. `mode=js` is the one worth
+trying: it proves Chrome starts inside the container.
 
 ### What this setup decides, and why
 
@@ -416,7 +418,8 @@ and coalesced requests.
 ```bash
 pip install -e '.[dev,documents,loadtest]'
 pytest -q -m 'not selenium'
-ruff check app tests helper/loadtest.py
+ruff check app tests helper/loadtest.py run.py
+ruff format --check app tests helper/loadtest.py run.py
 python -m compileall -q app helper run.py
 python -m build --no-isolation
 RUN_SELENIUM_TESTS=1 pytest -q tests/test_selenium_integration.py
@@ -425,7 +428,9 @@ coverage run -m pytest -q -m 'not selenium' && coverage combine && coverage repo
 
 The coverage run includes the spawned conversion and browser workers: an idle worker is
 asked to exit and flushes its data instead of being killed. Measured that way the suite
-covers 92 % of `app/`, against 81 % when only the main process is counted.
+covers 93 % of `app/`, against 92 % counting only the main process. Those two stood at
+92 % and 81 % in 0.8; they have converged because the unit tests now reach most of the
+conversion and browser modules in-process as well.
 
 CI runs unit/API tests on Python 3.11 to 3.14 plus a separate real Chrome job.
 The browser fixtures in `tests/test_selenium_integration.py` cover dynamic and late
