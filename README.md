@@ -72,10 +72,17 @@ on first use. Models are never downloaded while processing a request.
 `requirements.txt` installs the same core dependencies from `pyproject.toml`.
 
 The declared ranges resolve to the newest compatible releases, which is what CI
-tests. For a deployment that must resolve the same way twice, install against the
-verified set: `pip install -e '.[documents]' -c constraints.txt`. Refresh that file
-by re-resolving without it, running both suites and `pip-audit`, then
-`pip freeze --exclude-editable`.
+tests. There are two pinned sets beside them, for two different jobs:
+
+- `constraints.txt` is the version set verified together for development, on any
+  platform: `pip install -e '.[documents]' -c constraints.txt`. It pins versions but
+  carries no hashes. Refresh it by re-resolving without it, running both suites and
+  `pip-audit`, then `pip freeze --exclude-editable`.
+- `requirements.lock` is what the container installs. It was resolved on Debian 13
+  with Python 3.13 and names a hash for every artefact, so `--require-hashes` rejects
+  a package that was re-uploaded under the same version. Being one resolution for one
+  target, it is not a cross-platform file; the section on Docker says how to refresh
+  it.
 
 Preinstall compatible Chrome and ChromeDriver binaries in production and set
 `CHROME_BINARY` and `CHROMEDRIVER_PATH`. Otherwise Selenium Manager locates/downloads
@@ -157,6 +164,25 @@ curl -s -X POST localhost:8000/crawl \
   reap them they accumulate as zombies. Use `docker run --init` outside compose.
 - **The port is bound to `127.0.0.1`.** Put a reverse proxy in front for anything else;
   `deploy/nginx.conf` is a starting point with the rate limits this service expects.
+
+### Refreshing the lockfile
+
+`requirements.lock` is one resolution for one target, so it is refreshed in that target
+rather than on a developer's machine. Every artefact is downloaded to be hashed, which
+takes several minutes.
+
+```bash
+docker run --rm -v "$PWD:/src:ro" -w /work python:3.13-slim-trixie sh -c '
+  pip install -q pip-tools >&2
+  mkdir -p app && cp /src/pyproject.toml /src/README.md /src/LICENSE . && cp /src/app/__init__.py app/
+  pip-compile -q --generate-hashes --strip-extras --extra documents -o out.lock pyproject.toml >&2
+  cat out.lock' > new.lock && mv new.lock requirements.lock
+```
+
+The copies of `README.md`, `LICENSE` and `app/__init__.py` are there because the project
+metadata declares them. Afterwards rebuild the image and run the suites; a dependency the
+lock misses fails the build rather than the deployment, because `--require-hashes` refuses
+to install anything the file does not name.
 
 ### Operating it
 

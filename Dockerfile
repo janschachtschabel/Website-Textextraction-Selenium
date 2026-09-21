@@ -7,11 +7,13 @@ FROM python:3.13-slim-trixie AS build
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore
 WORKDIR /src
-# Only what the build backend reads: the metadata, the files it declares, and the
-# package whose __init__ carries the version.
-COPY pyproject.toml README.md LICENSE ./
-COPY app ./app
-RUN python -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir '.[documents]'
+# Only the lockfile: every version is pinned and every artefact hash-checked, so two
+# builds of the same commit install the same bytes. The project itself is not built
+# here - nothing reads its package metadata, so the source is copied in below and the
+# build backend, which would be fetched unpinned and runs code, is never needed.
+COPY requirements.lock ./
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r requirements.lock
 
 
 FROM python:3.13-slim-trixie
@@ -27,7 +29,10 @@ RUN apt-get update \
 RUN useradd --create-home --shell /usr/sbin/nologin --uid 10001 extraction
 
 COPY --from=build /opt/venv /opt/venv
+# python run.py puts /app on the import path, which is all the package needs.
 COPY run.py /app/run.py
+COPY app /app/app
+COPY LICENSE /app/LICENSE
 WORKDIR /app
 
 # The result cache refuses to open unless it is private to the service user, so it is

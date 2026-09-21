@@ -3,6 +3,24 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## 0.10.1 - 2026-09-21
+
+### Changed - the image installs a locked, hash-checked dependency set
+
+- `requirements.lock` pins every direct and transitive dependency and names a hash for
+  every artefact, resolved on Debian 13 with Python 3.13 - the image's own target. The
+  Dockerfile installs it with `--require-hashes`, so a package re-uploaded under a version
+  already pinned is rejected rather than installed. This closes `A07` of the audit of 17
+  September, open until now because such a lock has to be produced on the target platform
+  and this repository is developed on Windows; the container added in 0.10.0 is that
+  platform.
+- The image no longer builds the project. Nothing reads its package metadata, so the
+  source is copied in and the build backend - fetched unpinned, and running code at build
+  time - is never needed. Dependency layers now also stay cached when only the source
+  changes.
+- `constraints.txt` keeps its own job: the version set verified for development installs
+  on any platform, without hashes. The README says which file answers which need.
+
 ## 0.10.0 - 2026-09-21
 
 ### Changed - the documented surface is the real one
