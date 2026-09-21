@@ -208,15 +208,14 @@ def test_a_hidden_accessibility_wrapper_does_not_swallow_the_formula():
 def test_a_deeply_nested_formula_does_not_fail_the_conversion():
     """Nesting is the page's to choose; converting it must not exhaust the stack."""
     formula = "<math>" + "<mrow>" * 600 + "<mi>x</mi>" + "</mrow>" * 600 + "</math>"
-    markdown = bytes_to_markdown(f"<html><body><p>Es gilt {formula}.</p></body></html>".encode(), "text/html",
-                                 html_converter="bs4")
+    markdown = bytes_to_markdown(
+        f"<html><body><p>Es gilt {formula}.</p></body></html>".encode(), "text/html", html_converter="bs4"
+    )
     assert "x" in markdown
 
 
 def test_a_hidden_wrapper_is_revealed_for_presentation_markup_too():
-    formula = (
-        '<span class="wrapper" style="display: none;"><math><msqrt><mi>x</mi></msqrt></math></span>'
-    )
+    formula = '<span class="wrapper" style="display: none;"><math><msqrt><mi>x</mi></msqrt></math></span>'
     markdown = trafilatura_markdown(f"<main>{{}}<p>Die Wurzel ist {formula}.</p></main>")
     assert r"$$\sqrt{x}$$" in markdown
 
