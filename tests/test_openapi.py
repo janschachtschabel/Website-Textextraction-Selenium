@@ -93,3 +93,34 @@ def test_the_example_answer_counts_its_own_text_correctly():
     example = SCHEMA["components"]["schemas"]["CrawlResponse"]["examples"][0]
     assert example["markdown_length"] == len(example["markdown"])
     assert example["word_count"] == len(example["markdown"].split())
+
+
+def request_examples():
+    """Every example /docs offers for a request body, per operation."""
+    offered = {}
+    for path, operations in SCHEMA["paths"].items():
+        for verb, operation in operations.items():
+            body = operation.get("requestBody")
+            if not body:
+                continue
+            content = body["content"]["application/json"]
+            name = content["schema"]["$ref"].rsplit("/", 1)[-1]
+            examples = [entry["value"] for entry in content.get("examples", {}).values()]
+            offered[f"{verb.upper()} {path}"] = (name, examples or SCHEMA["components"]["schemas"][name]["examples"])
+    return offered
+
+
+def test_every_request_body_shows_every_option_it_accepts():
+    """A minimal example is the one to send; it must not be the only one, or the options
+    are only discoverable by leaving "Try it out" for the schema tab."""
+    for operation, (name, examples) in request_examples().items():
+        fields = set(SCHEMA["components"]["schemas"][name]["properties"])
+        shown = set().union(*(set(example) for example in examples))
+        assert shown == fields, f"{operation} never shows: {sorted(fields - shown)}"
+
+
+def test_every_offered_request_example_is_one_the_service_accepts():
+    for operation, (name, examples) in request_examples().items():
+        assert examples, f"{operation} offers none"
+        for example in examples:
+            REQUESTS[name](**example)

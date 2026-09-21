@@ -31,6 +31,44 @@ BATCH_EXAMPLE = {
 }
 
 
+# The same request with every option named, for readers who want to see what there is.
+# Verified against the running service: it crawls, renders, shoots and reports no warning.
+CRAWL_FULL_EXAMPLE = {
+    "url": "https://example.com",
+    "mode": "js",
+    "js_strategy": "accuracy",
+    "timeout_ms": 120000,
+    "retries": 1,
+    "max_bytes": 10485760,
+    # Empty, not null: the encoder drops a null from a published example, and the
+    # validator reads an empty proxy as "none" anyway, so Execute still works.
+    "proxy": "",
+    "allow_insecure_ssl": False,
+    "user_agent": "MyCrawler/1.0 (+https://example.org/bot)",
+    "accept_language": "de,en;q=0.8",
+    "headless": True,
+    "js_auto_wait": True,
+    "wait_for_selectors": ["body"],
+    "wait_for_ms": 0,
+    "html_converter": "trafilatura",
+    "trafilatura_clean_markdown": True,
+    "media_conversion_policy": "skip",
+    "extract_links": True,
+    "extract_metadata": True,
+    "screenshot": True,
+    "screenshot_full_page": True,
+    "anonymize": False,
+    "anonymize_language": "de",
+    "crawl_rate_limit_rps": 1,
+    "respect_robots_txt": True,
+    "force_refresh": False,
+}
+BATCH_FULL_EXAMPLE = {key: value for key, value in CRAWL_FULL_EXAMPLE.items() if key != "url"} | {
+    "urls": BATCH_EXAMPLE["urls"],
+    "max_concurrency": 3,
+}
+
+
 # A real answer, from a crawl of example.com, so the shape and the counts are honest
 # rather than a placeholder of "string" and 0 for every field.
 CRAWL_ANSWER_EXAMPLE = {

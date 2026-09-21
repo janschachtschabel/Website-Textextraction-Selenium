@@ -4,7 +4,7 @@ import math
 import secrets
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Path, Security
+from fastapi import Body, FastAPI, HTTPException, Path, Security
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
@@ -19,6 +19,10 @@ from .request_id import RequestId
 from .resources import Resources
 from .results import CrawlError
 from .schemas import (
+    BATCH_EXAMPLE,
+    BATCH_FULL_EXAMPLE,
+    CRAWL_EXAMPLE,
+    CRAWL_FULL_EXAMPLE,
     BatchCrawlRequest,
     BatchCrawlResponse,
     CrawlRequest,
@@ -47,6 +51,15 @@ the browser.
 **Authentication.** When the operator configures an API key, every endpoint except `/` and
 `/health` requires `Authorization: Bearer <key>`, and this page is not published at all.
 """
+
+
+def _choices(minimal, complete, what):
+    """Swagger offers these as a dropdown. The minimal body is the one to send; the
+    complete one exists so every option is visible without leaving "Try it out"."""
+    return {
+        "minimal": {"summary": f"Minimal - {what}", "value": minimal},
+        "complete": {"summary": "Every option named, at a working value", "value": complete},
+    }
 
 
 def create_app(config=settings, resources=None):
@@ -165,7 +178,9 @@ def create_app(config=settings, resources=None):
     @application.post(
         "/crawl", response_model=CrawlResponse, dependencies=[Security(check_auth)], summary="Crawl one URL"
     )
-    async def crawl(request: CrawlRequest):
+    async def crawl(
+        request: CrawlRequest = Body(openapi_examples=_choices(CRAWL_EXAMPLE, CRAWL_FULL_EXAMPLE, "just the URL")),
+    ):
         """Fetch one URL and return it as Markdown.
 
         Only `url` is required; every other option falls back to the operator's default. The
@@ -180,12 +195,17 @@ def create_app(config=settings, resources=None):
         dependencies=[Security(check_auth)],
         summary="Crawl up to 50 URLs and wait",
     )
-    async def batch(request: BatchCrawlRequest):
+    async def batch(
+        request: BatchCrawlRequest = Body(
+            openapi_examples=_choices(BATCH_EXAMPLE, BATCH_FULL_EXAMPLE, "just the URLs")
+        ),
+    ):
         """Crawl up to 50 URLs and answer once the last one is done.
 
-        The request is held for the whole batch. `max_concurrency` bounds how many run at
-        once; the service-wide capacity may hold it lower. A URL that fails carries its own
-        reason and does not fail the others."""
+        The connection is held open for the whole batch, which can be minutes.
+        `max_concurrency` bounds how many run at once; the service-wide capacity may hold
+        it lower. A URL that fails carries its own reason and does not fail the others.
+        `POST /jobs` does the same crawling and answers immediately instead."""
         admit(len(request.urls))
         return await application.state.resources.service.crawl_batch(
             [str(url) for url in request.urls], resolve_options(request, config), request.max_concurrency
@@ -198,11 +218,17 @@ def create_app(config=settings, resources=None):
         dependencies=[Security(check_auth)],
         summary="Submit up to 50 URLs as a background job",
     )
-    async def submit_job(request: BatchCrawlRequest):
+    async def submit_job(
+        request: BatchCrawlRequest = Body(
+            openapi_examples=_choices(BATCH_EXAMPLE, BATCH_FULL_EXAMPLE, "just the URLs")
+        ),
+    ):
         """Take the body of /crawl/batch, answer at once with a job id and crawl in the background.
 
-        Use it when a batch would outlive the client's patience. Poll `status_url` for the
-        result."""
+        Same body and the same crawling as `/crawl/batch`; only the delivery differs. Use
+        it when the connection would not survive the wait: proxies and tunnels commonly cut
+        a request at about 125 seconds, while a batch may run for ten minutes. Poll
+        `status_url`; the record stays readable for an hour after the job finishes."""
         admit(len(request.urls))
         job_id = await application.state.resources.jobs.submit(
             [str(url) for url in request.urls], resolve_options(request, config), request.max_concurrency

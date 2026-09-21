@@ -12,8 +12,12 @@ the internal structure. Dates are release dates of this repository.
   so the body `/docs` offered was `url: "string"` with `timeout_ms: 0` and `max_bytes: 0`:
   rejected by the validation, and a reader who corrected only the URL then crawled with
   `User-Agent: string`. 20 of 97 fields were described; no endpoint was described at all.
-  The request examples are the shortest body that works, the response examples come from
-  real crawls of example.com.
+  Each body endpoint offers two, in a dropdown: the shortest body that works, and one
+  naming every option at a value that works - the first attempt showed only the short one,
+  which moved the option list behind the schema tab. The response examples come from real
+  crawls of example.com.
+- `/crawl/batch` and `/jobs` now say how they differ: the same crawling, delivered by a
+  held-open connection or by an immediate job id.
 - A `proxy` of `"string"` is a 422 instead of being read silently as "no proxy". The
   workaround existed only to absorb the placeholder, and it hid a mistyped proxy just as
   quietly.
