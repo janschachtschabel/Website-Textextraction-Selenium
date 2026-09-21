@@ -1,4 +1,9 @@
-"""FastAPI boundary: authentication, schemas and endpoint adaptation."""
+"""FastAPI boundary: authentication, schemas and endpoint adaptation.
+
+The routes are registered in groups, one per concern, so this module's one function
+that assembles the application stays readable as endpoints are added. Each group takes
+what it needs rather than closing over everything the factory happens to have.
+"""
 
 import math
 import secrets
@@ -62,7 +67,7 @@ def _choices(minimal, complete, what):
     }
 
 
-def create_app(config=settings, resources=None):
+def _lifespan(config, resources):
     @asynccontextmanager
     async def lifespan(application):
         setup_logging(config.log_level, config.log_json)
@@ -76,20 +81,22 @@ def create_app(config=settings, resources=None):
             application.state.resources = active
             yield
 
-    # A key-protected deployment does not advertise its request surface.
-    application = FastAPI(
-        title="Website Text Extraction — Selenium",
-        version=__version__,
-        summary="Web pages as Markdown, with an optional browser for JavaScript sites",
-        description=DESCRIPTION,
-        lifespan=lifespan,
-        docs_url=None if config.api_key else "/docs",
-        redoc_url=None if config.api_key else "/redoc",
-        openapi_url=None if config.api_key else "/openapi.json",
-    )
-    application.add_middleware(BodySizeLimit, max_bytes=config.max_request_bytes)
-    application.add_middleware(RequestId)  # added last, so it runs first and tags every answer
+    return lifespan
+
+
+def _authenticator(config):
     bearer = HTTPBearer(auto_error=False)
+
+    def check_auth(credentials: HTTPAuthorizationCredentials | None = Security(bearer)):
+        if config.api_key and (
+            credentials is None or not secrets.compare_digest(credentials.credentials.encode(), config.api_key.encode())
+        ):
+            raise HTTPException(401, "Invalid or missing API token", headers={"WWW-Authenticate": "Bearer"})
+
+    return check_auth
+
+
+def _admission(config):
     limit = (
         InboundLimit(config.inbound_rate_limit_rps, config.inbound_rate_limit_burst)
         if config.inbound_rate_limit_rps
@@ -102,15 +109,11 @@ def create_app(config=settings, resources=None):
         if wait:
             raise HTTPException(429, "Too many crawl requests", headers={"Retry-After": str(math.ceil(wait))})
 
-    def check_auth(credentials: HTTPAuthorizationCredentials | None = Security(bearer)):
-        if config.api_key and (
-            credentials is None or not secrets.compare_digest(credentials.credentials.encode(), config.api_key.encode())
-        ):
-            raise HTTPException(401, "Invalid or missing API token", headers={"WWW-Authenticate": "Bearer"})
+    return admit
 
-    @application.exception_handler(CrawlError)
-    async def crawl_error_handler(request, exc):
-        return JSONResponse({"detail": str(exc)}, status_code=exc.status_code)
+
+def _public_routes(application, config):
+    """Reachable without a key, so a probe can identify the service and watch it."""
 
     @application.get("/", summary="Service banner")
     async def root():
@@ -139,6 +142,10 @@ def create_app(config=settings, resources=None):
             },
             status_code=200 if active.ready else 503,
         )
+
+
+def _observability_routes(application, check_auth):
+    """The same counters twice: as JSON for a person, as text for Prometheus."""
 
     @application.get("/stats", dependencies=[Security(check_auth)], summary="Counters of the last hour")
     async def stats():
@@ -174,6 +181,10 @@ def create_app(config=settings, resources=None):
             ),
         }
         return Response(render(await active.metrics.totals(), gauges), media_type=CONTENT_TYPE_LATEST)
+
+
+def _crawl_routes(application, config, admit, check_auth):
+    """Crawling that answers when it is done; the caller waits."""
 
     @application.post(
         "/crawl", response_model=CrawlResponse, dependencies=[Security(check_auth)], summary="Crawl one URL"
@@ -211,6 +222,10 @@ def create_app(config=settings, resources=None):
             [str(url) for url in request.urls], resolve_options(request, config), request.max_concurrency
         )
 
+
+def _job_routes(application, config, admit, check_auth):
+    """The same crawling, delivered by a job id instead of a held-open connection."""
+
     @application.post(
         "/jobs",
         status_code=202,
@@ -247,6 +262,32 @@ def create_app(config=settings, resources=None):
             raise HTTPException(404, "Unknown or expired job")
         return JobStatus(job_id=job_id, **{name: record[name] for name in JobStatus.model_fields if name != "job_id"})
 
+
+def create_app(config=settings, resources=None):
+    # A key-protected deployment does not advertise its request surface.
+    application = FastAPI(
+        title="Website Text Extraction — Selenium",
+        version=__version__,
+        summary="Web pages as Markdown, with an optional browser for JavaScript sites",
+        description=DESCRIPTION,
+        lifespan=_lifespan(config, resources),
+        docs_url=None if config.api_key else "/docs",
+        redoc_url=None if config.api_key else "/redoc",
+        openapi_url=None if config.api_key else "/openapi.json",
+    )
+    application.add_middleware(BodySizeLimit, max_bytes=config.max_request_bytes)
+    application.add_middleware(RequestId)  # added last, so it runs first and tags every answer
+    check_auth = _authenticator(config)
+    admit = _admission(config)
+
+    @application.exception_handler(CrawlError)
+    async def crawl_error_handler(request, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=exc.status_code)
+
+    _public_routes(application, config)
+    _observability_routes(application, check_auth)
+    _crawl_routes(application, config, admit, check_auth)
+    _job_routes(application, config, admit, check_auth)
     return application
 
 
