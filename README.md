@@ -4,9 +4,11 @@ An HTTP-first FastAPI service that extracts web pages and documents into Markdow
 It uses Trafilatura for main content, MarkItDown for document conversion, and
 Selenium/Chrome when JavaScript rendering is needed. No Playwright dependency.
 
-Version 0.9 keeps a page's mathematics - presentation MathML becomes LaTeX, and formulas a
-page hides from sighted readers are no longer dropped - and stops worker teardown from
-blocking the event loop; 0.8 added Python 3.14 support, full-page screenshots and worker
+Version 0.10 makes the request surface readable - every field of every model says what it
+is for, and `/docs` offers a request that works instead of a body of `"string"` - and ships
+a Debian 13 image with Chromium; 0.9 kept a page's mathematics, turning presentation MathML
+into LaTeX and no longer dropping formulas a page hides from sighted readers, and stopped
+worker teardown from blocking the event loop; 0.8 added Python 3.14 support, full-page screenshots and worker
 coverage; 0.7 added request correlation ids, browser status in `/health` and a faster auto
 mode;
 0.6 added Prometheus metrics, background jobs, an optional robots.txt check and
@@ -83,6 +85,87 @@ Ubuntu's AppArmor profile does not cover arbitrary downloaded Chrome binaries.
 See the [Chromium sandbox documentation](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md).
 CI uses the runner's packaged Chrome and matching ChromeDriver, and checks that
 Chrome starts with sandboxing enabled before running browser fixtures.
+
+## Run in Docker on Debian 13
+
+The image is built on Debian 13 (trixie) and takes Chromium and its driver from the
+distribution, which ships them as a matched pair - a Chrome fetched separately drifts out
+of step with its driver at the next rebuild. It carries the `documents` extra, so PDF and
+Office conversion works out of the box. The image is 1.3 GB: 738 MB of that is Chromium
+and the libraries it pulls in, 462 MB the Python environment.
+
+### Install Docker
+
+Debian's own `docker.io` package lags behind; these are the steps for Docker's repository,
+which publishes for trixie.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian trixie stable" | sudo tee /etc/apt/sources.list.d/docker.list
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+### Build and start
+
+```bash
+git clone https://github.com/janschachtschabel/Website-Textextraction-Selenium.git
+cd Website-Textextraction-Selenium
+echo "API_KEY=$(openssl rand -hex 24)" > .env
+sudo docker compose up -d --build
+```
+
+`API_KEY` is required. The container binds to `0.0.0.0`, and the service refuses any
+non-loopback address without a key, so a missing one stops the stack before it starts
+rather than exposing an open crawler. The key is passed at run time and never enters the
+image. Because a key is set, `/docs` is not published - read the schema from a local
+keyless run, as under "Install and run".
+
+Port 8000 is crowded on most machines; `HOST_PORT=8188 docker compose up -d` moves the
+published port without editing the file. The service always listens on 8000 inside.
+
+### Check it
+
+```bash
+curl -s localhost:8000/health
+curl -s -X POST localhost:8000/crawl \
+  -H "authorization: Bearer $API_KEY" -H 'content-type: application/json' \
+  -d '{"url": "https://example.com", "mode": "js"}'
+```
+
+`mode=js` is the one worth trying: it proves Chrome starts inside the container.
+
+### What this setup decides, and why
+
+- **Chrome runs without its own sandbox.** Docker's default seccomp profile blocks the
+  namespaces that sandbox needs, and Chrome aborts with "Failed to move to new namespace".
+  The container is the boundary instead: an unprivileged user (uid 10001),
+  `no-new-privileges`, and the syscall filter intact. The alternative is to make Chrome's
+  sandbox the boundary - `SELENIUM_NO_SANDBOX=false` together with
+  `--security-opt seccomp=unconfined` - which works, but gives up the container's syscall
+  filter in exchange. Pick one. Relaxing seccomp while leaving `SELENIUM_NO_SANDBOX=true`
+  is the combination to avoid: it drops the filter and gains nothing.
+- **The cache is a named volume.** The service refuses to open a result cache that is not
+  private to its user, and a named volume inherits the directory's owner and its `0700`
+  mode from the image. A bind mount does not, so `-v ./cache:/var/cache/...` fails at
+  startup until the host directory is owned by uid 10001 with mode 0700.
+- **`init: true`.** Chrome forks helpers that outlive a crash; without an init process to
+  reap them they accumulate as zombies. Use `docker run --init` outside compose.
+- **The port is bound to `127.0.0.1`.** Put a reverse proxy in front for anything else;
+  `deploy/nginx.conf` is a starting point with the rate limits this service expects.
+
+### Operating it
+
+```bash
+sudo docker compose logs -f     # LOG_JSON=true is set, one object per line
+sudo docker compose ps          # the health check calls the public /health
+sudo docker compose down        # add -v to discard the cache volume as well
+```
+
 
 ## Extract a page
 

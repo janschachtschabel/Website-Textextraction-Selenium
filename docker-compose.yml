@@ -1,0 +1,30 @@
+services:
+  extraction:
+    build: .
+    image: website-textextraction:latest
+    # Chrome forks helpers that outlive a crash; without an init they accumulate as
+    # zombies until the container hits its process limit.
+    init: true
+    # The service binds beyond loopback here, which it refuses without a key.
+    # Put API_KEY in a .env file next to this one; it is never baked into the image.
+    environment:
+      API_KEY: ${API_KEY:?set API_KEY in .env}
+      LOG_JSON: "true"
+      UVICORN_WORKERS: "2"
+    ports:
+      # Host port only; inside the container the service always listens on 8000.
+      # Port 8000 is a crowded one, so it can be moved without editing this file.
+      - "127.0.0.1:${HOST_PORT:-8000}:8000"
+    volumes:
+      # A named volume inherits the directory's owner and its 0700 mode from the image.
+      # A bind mount does not, and the service then refuses to open the cache.
+      - extraction-cache:/var/cache/website-text-extraction
+    restart: unless-stopped
+    # Consistent with the image, which runs Chrome without its own sandbox because
+    # Docker's seccomp profile blocks the namespaces that sandbox needs. The container
+    # is the boundary; the README describes the alternative and what it costs.
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  extraction-cache:

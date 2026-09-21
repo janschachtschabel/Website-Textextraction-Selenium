@@ -3,6 +3,44 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## 0.10.0 - 2026-09-21
+
+### Changed - the documented surface is the real one
+
+- Every field of every request and response model carries a description, and each model
+  carries an example. FastAPI renders an undocumented field as a placeholder for its type,
+  so the body `/docs` offered was `url: "string"` with `timeout_ms: 0` and `max_bytes: 0`:
+  rejected by the validation, and a reader who corrected only the URL then crawled with
+  `User-Agent: string`. 20 of 97 fields were described; no endpoint was described at all.
+  The request examples are the shortest body that works, the response examples come from
+  real crawls of example.com.
+- A `proxy` of `"string"` is a 422 instead of being read silently as "no proxy". The
+  workaround existed only to absorb the placeholder, and it hid a mistyped proxy just as
+  quietly.
+
+Reading the code to write the descriptions corrected two documented behaviours:
+`media_conversion_policy=full` is not implemented and answers `unsupported`, and a failed
+batch entry carries its result as well as its reason - the result is absent only when the
+URL was refused before it was crawled.
+
+### Added - a container image
+
+- `Dockerfile`, `.dockerignore` and `docker-compose.yml` build a Debian 13 (trixie) image
+  with Chromium and its driver from the distribution, which ships them as a matched pair.
+  It runs as an unprivileged user, creates the result cache with the 0700 mode the service
+  insists on, and has a health check against the public `/health`.
+- The image sets `SELENIUM_NO_SANDBOX=true`: Docker's default seccomp profile blocks the
+  namespaces Chrome's own sandbox needs, so the container is the boundary instead. The
+  README documents the alternative - Chrome's sandbox with `seccomp=unconfined` - and what
+  it costs.
+- The README gained an installation guide for Debian 13, from Docker's own repository to a
+  crawl that proves the browser starts inside the container.
+
+### Housekeeping
+
+- `uv.lock`, `poetry.lock` and `Pipfile.lock` are ignored. An unreferenced `uv.lock` had
+  been sitting in the tree since 17 September, resolving to the versions of 0.7.0.
+
 ## 0.9.0 — 2026-09-20
 
 Findings from [the audit of 20 September 2026](docs/audits/2026-09-20-audit.md) are
