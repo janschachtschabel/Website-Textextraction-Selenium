@@ -99,3 +99,9 @@ celerybeat.pid
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Lock files of package managers the project does not use. Dependencies are
+# pinned in constraints.txt; a stale uv.lock would resolve to older versions.
+uv.lock
+poetry.lock
+Pipfile.lock
