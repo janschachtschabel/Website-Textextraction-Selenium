@@ -1,0 +1,78 @@
+name: publish image
+
+# A tag publishes the image the compose file pulls. workflow_dispatch exists because a
+# tag that already points at the right commit should not have to be moved to republish.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Written out rather than taken from the secret, so the logs name what was pushed and
+  # docker-compose.yml can be checked against it. Only the credentials are secret.
+  IMAGE: janschachtschabel/website-textextraction
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Take the version from the code, and refuse a tag that disagrees
+        id: version
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' app/__init__.py)
+          test -n "$version" || { echo "no __version__ in app/__init__.py"; exit 1; }
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match __version__ ${version}"
+            exit 1
+          fi
+          echo "value=${version}" >> "$GITHUB_OUTPUT"
+          echo "publishing ${IMAGE}:${version} and ${IMAGE}:latest"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build it, and keep it here for now
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE }}:${{ steps.version.outputs.value }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Publishing an image that cannot answer is worse than not publishing one. This is
+      # the same check the README gives a reader: /health, then a page through Chrome.
+      - name: Prove the image answers before anyone can pull it
+        run: |
+          docker run -d --init --name probe -e API_KEY=probe-key -p 127.0.0.1:8000:8000 \
+            "${IMAGE}:${{ steps.version.outputs.value }}"
+          for _ in $(seq 1 60); do
+            if curl -fsS localhost:8000/health > /dev/null 2>&1; then ready=1; break; fi
+            sleep 2
+          done
+          test -n "$ready" || { docker logs probe; exit 1; }
+          curl -fsS localhost:8000/health
+          curl -fsS -X POST localhost:8000/crawl \
+            -H 'authorization: Bearer probe-key' -H 'content-type: application/json' \
+            -d '{"url": "https://example.com", "mode": "js"}' \
+            | grep -q '"success": *true' || { docker logs probe; exit 1; }
+          docker rm -f probe
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push it
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.version.outputs.value }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha

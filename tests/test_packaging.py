@@ -74,3 +74,34 @@ def test_the_example_env_names_every_setting_the_service_reads():
     read -= {"XDG_CACHE_HOME"}  # freedesktop's own variable; RESULT_CACHE_DIR is the setting for it
     named = set(re.findall(r"^#?\s*([A-Z0-9_]+)=", (ROOT / ".env.example").read_text("utf-8"), re.M))
     assert read <= named, f".env.example never names: {sorted(read - named)}"
+
+
+def without_comments(name):
+    """Compose files carry long comments; the assertions below are about the settings."""
+    lines = (ROOT / name).read_text("utf-8").splitlines()
+    return "\n".join(line for line in lines if not line.lstrip().startswith("#"))
+
+
+def test_the_compose_file_a_panel_fetches_needs_no_checkout_and_no_variables():
+    """A panel fetches this one file and pulls. A build context it does not have, or a
+    required substitution it cannot fill, aborts the deployment before anything runs."""
+    settings = without_comments("docker-compose.yml")
+    assert "build:" not in settings, "a fetched compose file has no context to build from"
+    assert ":?" not in settings, "a required variable aborts compose, and a panel fills none"
+    assert re.search(r"image: \S+/\S+:\S+", settings), "the image must be pullable, not a local tag"
+
+
+def test_the_compose_image_is_the_one_the_workflow_publishes_at_this_version():
+    """A compose file naming an image nothing publishes is the failure this pair prevents."""
+    name, tag = re.search(r"image: (\S+):(\S+)", without_comments("docker-compose.yml")).groups()
+    published = re.search(r"IMAGE: (\S+)", without_comments(".github/workflows/publish.yml")).group(1)
+    version = re.search(r'__version__ = "(.+)"', (ROOT / "app/__init__.py").read_text("utf-8")).group(1)
+    assert name == published, f"compose pulls {name}, the workflow pushes {published}"
+    assert tag == version, f"compose pulls {tag}, the code says {version}"
+
+
+def test_a_checkout_still_builds_its_working_tree():
+    """Without the override, `docker compose up --build` would silently run the published
+    image instead of the change being tested."""
+    override = without_comments("docker-compose.override.yml")
+    assert "build:" in override and "API_KEY" in override

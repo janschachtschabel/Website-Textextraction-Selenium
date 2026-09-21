@@ -1,0 +1,17 @@
+# Committed on purpose, which is unusual for an override file.
+#
+# Compose merges this into docker-compose.yml automatically whenever it runs in a clone of
+# this repository, and never when a panel fetches that file by URL. So the two cases each
+# get what suits them: a deployment pulls a published image and is reachable, a checkout
+# builds the working tree and takes the loopback publishing that .env.example sets.
+#
+# Delete it, or run `docker compose -f docker-compose.yml up -d`, to run the published
+# image from a checkout instead of building.
+services:
+  extraction:
+    build: .
+    environment:
+      # Only here: a clone has a .env for compose to read, and the :? form says which one
+      # is missing before anything starts. A panel has no .env, which is why the file this
+      # overrides leaves API_KEY to the container's own environment.
+      API_KEY: ${API_KEY:?set API_KEY in .env, or copy .env.example}
