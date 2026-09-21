@@ -67,6 +67,24 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # Login succeeds even when the account cannot write to this namespace, and the push
+      # then fails with "insufficient_scope", which names neither cause. This separates
+      # them without printing the secret.
+      - name: Check the account owns the namespace it is about to push to
+        env:
+          LOGIN_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          namespace=${IMAGE%%/*}
+          if [ "$LOGIN_USER" != "$namespace" ]; then
+            echo "DOCKERHUB_USERNAME is not '${namespace}', so it cannot push to ${IMAGE}."
+            echo "Either set the secret to the Docker Hub account that owns '${namespace}',"
+            echo "or change IMAGE in this workflow and the image in docker-compose.yml."
+            exit 1
+          fi
+          echo "DOCKERHUB_USERNAME matches '${namespace}'."
+          echo "If the push still fails with insufficient_scope, the access token is not"
+          echo "Read & Write, or it is scoped to repositories that do not include this one."
+
       - name: Push it
         uses: docker/build-push-action@v6
         with:
