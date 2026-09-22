@@ -3,6 +3,37 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## 2.2.1 - 2026-09-22
+
+### Fixed - a repeat crawl of a CDN-hosted page failed for a day
+
+Reported from a running deployment: crawling `en.wikipedia.org` answered 502 "Incomplete
+compressed HTTP response" in 67 milliseconds - far too fast for a fetch that reached the
+page at all.
+
+The cause is the revalidation added in 0.6.0. A second crawl within `REVALIDATION_TTL`
+sends a conditional request, and an unchanged page answers `304 Not Modified`. A 304 has
+no body, but it keeps the headers of the representation it stands for - `Content-Encoding`
+among them. `read_body` saw `gzip`, received no bytes, found no end of a gzip stream and
+raised. Confirmed against the live site: Wikipedia's 304 carries `Content-Encoding: gzip`
+with a zero-byte body.
+
+So the feature that exists to save a fetch made every repeat crawl of such a page fail,
+and it stayed that way until the stale entry expired 24 hours later. Wikimedia, Fastly and
+Cloudflare all answer this way.
+
+- 204 and 304 responses are no longer read as bodies (RFC 9110). Verified end to end
+  against `en.wikipedia.org`: the second fetch now returns `304` with zero bytes instead of
+  raising.
+- `_request` is now its own function. Splitting the branch in kept `_redirects` under the
+  complexity gate added in 2.0.0, which is what caught the growth.
+
+Why no test held this: every revalidation test answers through `httpx.MockTransport`, whose
+responses arrive already consumed, so `read_body` returns at its first line and its
+decompression path never runs. The fixture also sent a bare `304` with no headers, which is
+the case that does not occur in the wild. Both are corrected - the fixture now echoes
+`Content-Encoding` as a CDN does, and the regression test builds a real unconsumed stream.
+
 ## 2.2.0 - 2026-09-22
 
 ### Changed - the interactive documentation is protected, not removed

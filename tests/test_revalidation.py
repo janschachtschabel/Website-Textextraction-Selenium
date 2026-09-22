@@ -29,7 +29,11 @@ async def revalidating_api(tmp_path, article_html):
         if (etag and request.headers.get("if-none-match") == etag) or (
             not etag and request.headers.get("if-modified-since") == modified
         ):
-            return httpx.Response(304)
+            # A 304 carries no body but keeps the headers of the representation it stands
+            # for, Content-Encoding among them. Wikimedia, Fastly and Cloudflare all do
+            # this; a bare 304 is the unrealistic case, and testing only that one hid a bug
+            # that broke every repeat crawl for a day.
+            return httpx.Response(304, headers={"content-encoding": "gzip"})
         headers = {"content-type": "text/html", "last-modified": modified}
         if etag:
             headers["etag"] = etag

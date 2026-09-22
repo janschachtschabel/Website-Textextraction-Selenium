@@ -15,6 +15,9 @@ from .schemas import CrawlOptions
 from .security import resolve_target
 
 RETRY_STATUSES = {429, 500, 502, 503, 504}
+# RFC 9110: these carry no body, but keep the headers of the representation they stand for,
+# Content-Encoding among them. Reading one as a compressed stream finds no end of one.
+BODILESS_STATUSES = {204, 304}
 # Transport-level requests carry no client defaults: without Accept some servers answer 406.
 ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
 VALIDATORS = {"etag": ("etag", "If-None-Match"), "last_modified": ("last-modified", "If-Modified-Since")}
@@ -41,6 +44,24 @@ def retry_delay(value: str | None, attempt: int) -> float:
             except (ValueError, TypeError, OverflowError):
                 pass  # Invalid Retry-After: use bounded exponential backoff.
     return min(2**attempt, 8)
+
+
+def _request(url, options, validators, remaining):
+    """The outgoing GET. Conditional only when the validators belong to this very URL: a
+    redirect may leave the site that issued them, and an ETag can identify a visitor."""
+    headers = {"User-Agent": options.user_agent, "Accept": ACCEPT, "Accept-Encoding": "gzip, deflate"}
+    if options.accept_language:
+        headers["Accept-Language"] = options.accept_language
+    if validators.get("url") == url:
+        for name, (_, conditional) in VALIDATORS.items():
+            if name in validators:
+                headers[conditional] = validators[name]
+    return httpx.Request(
+        "GET",
+        url,
+        headers=headers,
+        extensions={"timeout": dict.fromkeys(("connect", "read", "write", "pool"), remaining)},
+    )
 
 
 class HTTPFetcher:
@@ -98,26 +119,16 @@ class HTTPFetcher:
             await deadline.run(asyncio.to_thread(self.validate, url))
             if self.acquire:
                 await self.acquire(url, options.crawl_rate_limit_rps, deadline)
-            remaining = deadline.remaining()
-            headers = {"User-Agent": options.user_agent, "Accept": ACCEPT, "Accept-Encoding": "gzip, deflate"}
-            if options.accept_language:
-                headers["Accept-Language"] = options.accept_language
-            if validators.get("url") == url:
-                for name, (_, conditional) in VALIDATORS.items():
-                    if name in validators:
-                        headers[conditional] = validators[name]
-            request = httpx.Request(
-                "GET",
-                url,
-                headers=headers,
-                extensions={"timeout": dict.fromkeys(("connect", "read", "write", "pool"), remaining)},
-            )
+            request = _request(url, options, validators, deadline.remaining())
             response = await self.transports[options.allow_insecure_ssl].handle_async_request(request)
             try:
                 if response.status_code in {301, 302, 303, 307, 308} and response.headers.get("location"):
                     url = urljoin(url, response.headers["location"])
                     continue
-                data, truncated = await read_body(response, options.max_bytes)
+                if response.status_code in BODILESS_STATUSES:
+                    data, truncated = b"", False
+                else:
+                    data, truncated = await read_body(response, options.max_bytes)
                 result = FetchResult(
                     data,
                     str(request.url),

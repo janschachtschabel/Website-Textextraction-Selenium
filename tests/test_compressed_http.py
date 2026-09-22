@@ -82,3 +82,29 @@ async def test_corrupt_deflate_bodies_are_still_rejected():
     response = httpx.Response(200, stream=GzipStream(b"not compressed at all"), headers={"content-encoding": "deflate"})
     with pytest.raises(CrawlError, match="compressed"):
         await read_body(response, 4096)
+
+
+class NoBody(httpx.AsyncByteStream):
+    """A 304 carries no body at all - not an empty chunk, no chunk."""
+
+    async def __aiter__(self):
+        for chunk in ():
+            yield chunk
+
+
+async def test_a_304_that_echoes_content_encoding_has_no_body_to_decompress():
+    """A 304 keeps the headers of the representation it stands for, Content-Encoding among
+    them - Wikimedia, Fastly and Cloudflare all do this. Reading it as a gzip stream found
+    no end of one and failed the crawl with 502 "Incomplete compressed HTTP response", for
+    every repeat crawl until the stale entry expired a day later."""
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(304, stream=NoBody(), headers={"content-encoding": "gzip"})
+    )
+    fetcher = HTTPFetcher(transport=transport, validate=lambda url: None)
+    try:
+        result = await fetcher.fetch(
+            "https://example.com", resolve_options(CrawlRequest(url="https://example.com")), Deadline(5)
+        )
+        assert result.status_code == 304 and result.data == b"" and not result.truncated
+    finally:
+        await fetcher.close()
