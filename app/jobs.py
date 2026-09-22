@@ -1,8 +1,8 @@
 """Background batch jobs for clients whose connection cannot stay open that long.
 
 A Cloudflare quick tunnel ends a request after about 125 seconds, while a batch may run
-for up to ten minutes. Job records live in the shared state store, so every Uvicorn
-worker can answer a poll; the work itself runs in the process that accepted it.
+for as long as its deadline allows. Job records live in the shared state store, so every
+Uvicorn worker can answer a poll; the work itself runs in the process that accepted it.
 """
 
 import asyncio

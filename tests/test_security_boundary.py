@@ -270,6 +270,21 @@ def test_the_operator_can_admit_more_urls():
     assert "2000" in refused.value.detail
 
 
+def test_the_published_schema_names_the_configured_limit_not_a_constant():
+    """Until 2.3.0 the count was fixed at 50, so the route texts could name it. It is the
+    operator's now, and a deployment that raises it published a schema contradicting
+    itself: "as many as the operator allows" in the description, "up to 50" on the routes
+    a caller actually reads in Swagger UI."""
+    schema = create_app(replace(LOCAL, max_urls_per_request=2000)).openapi()
+    texts = [
+        schema["paths"][path]["post"][field]
+        for path in ("/crawl/batch", "/jobs")
+        for field in ("summary", "description")
+    ]
+    assert not [text for text in texts if "50" in text], f"the old constant is still published: {texts}"
+    assert [text for text in texts if "2000" in text], f"no route text names the configured limit: {texts}"
+
+
 @pytest.mark.parametrize("requested, allowed", [(600_001, False), (600_000, True)])
 def test_a_deadline_above_the_operator_ceiling_is_refused(requested, allowed):
     """600 s is the default ceiling; a bulk deployment raises MAX_TIMEOUT_SECONDS."""

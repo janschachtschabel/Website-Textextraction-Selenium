@@ -257,14 +257,14 @@ def _crawl_routes(application, config, admit, check_auth):
         "/crawl/batch",
         response_model=BatchCrawlResponse,
         dependencies=[Security(check_auth)],
-        summary="Crawl up to 50 URLs and wait",
+        summary=f"Crawl up to {config.max_urls_per_request} URLs and wait",
     )
     async def batch(
         request: BatchCrawlRequest = Body(
             openapi_examples=_choices(BATCH_EXAMPLE, BATCH_FULL_EXAMPLE, "just the URLs")
         ),
     ):
-        """Crawl up to 50 URLs and answer once the last one is done.
+        """Crawl a list of URLs and answer once the last one is done.
 
         The connection is held open for the whole batch, which can be minutes.
         `max_concurrency` bounds how many run at once; the service-wide capacity may hold
@@ -284,7 +284,7 @@ def _job_routes(application, config, admit, check_auth):
         status_code=202,
         response_model=JobAccepted,
         dependencies=[Security(check_auth)],
-        summary="Submit up to 50 URLs as a background job",
+        summary=f"Submit up to {config.max_urls_per_request} URLs as a background job",
     )
     async def submit_job(
         request: BatchCrawlRequest = Body(
@@ -295,8 +295,8 @@ def _job_routes(application, config, admit, check_auth):
 
         Same body and the same crawling as `/crawl/batch`; only the delivery differs. Use
         it when the connection would not survive the wait: proxies and tunnels commonly cut
-        a request at about 125 seconds, while a batch may run for ten minutes. Poll
-        `status_url`; the record stays readable for an hour after the job finishes."""
+        a request at about 125 seconds, while a batch runs as long as its deadline allows.
+        Poll `status_url`; the record stays readable for an hour after the job finishes."""
         admit(len(request.urls))
         job_id = await application.state.resources.jobs.submit(
             [str(url) for url in request.urls], resolve_options(request, config), request.max_concurrency

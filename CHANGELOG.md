@@ -3,6 +3,29 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## 2.3.1 - 2026-09-22
+
+### Fixed - the published schema still named the limit 2.3.0 had made a setting
+
+2.3.0 turned 50 URLs and the ten-minute deadline into `MAX_URLS_PER_REQUEST` and
+`MAX_TIMEOUT_SECONDS`. The schema the service publishes about itself kept the old numbers.
+The API description said a batch takes "as many as the operator allows"; the two routes
+directly below it said "Crawl up to 50 URLs" and "a batch may run for ten minutes". A
+deployment configured for 2000 understated itself by 40x in its own document, and `/docs`
+has been reachable behind the API key since 2.2.0, so this is what a caller reads.
+
+- Both route summaries name `config.max_urls_per_request`, so the document states the
+  limit that deployment enforces. The descriptions no longer name a duration a setting
+  decides.
+- A test builds the schema at a raised limit and fails on any route text still carrying the
+  old constant. The drift happened because nothing read the published document back.
+- No behaviour changes. The limits have been the operator's since 2.3.0; only the
+  description of them was stale.
+
+Also verified rather than assumed: the two-second throttle on progress writes is now
+load-bearing in a test. Removing it left all eleven job tests green while turning a
+2000-URL batch in fast mode into one write per URL to a store shared across processes.
+
 ## 2.3.0 - 2026-09-22
 
 ### Added - the batch limits are the operator's, and a running job says how far it is
