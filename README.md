@@ -38,7 +38,9 @@ python run.py
 `HOST` defaults to `127.0.0.1`. Any other address requires `API_KEY`; the service
 refuses to start with a non-loopback host and no key. The examples below assume the
 key is also exported in your shell. `/docs`, `/redoc` and `/openapi.json` document
-the request and response schema and are served only while no key is configured.
+the request and response schema. They are public while no key is configured and require
+it once one is - as a bearer token, or as the password of an HTTP Basic prompt, since a
+browser cannot put a bearer token on a navigation. The username is not checked.
 `/health` is public and reports process readiness even while all workers are busy, plus
 whether the configured Chrome and ChromeDriver exist - their paths only while no key is
 configured. A missing binary is also logged as a warning at startup instead of failing
@@ -152,9 +154,11 @@ so this runs the working tree rather than the published image.
 `API_KEY` is required. The container binds to `0.0.0.0`, and the service refuses any
 non-loopback address without a key, so a missing one stops the stack before it starts
 rather than exposing an open crawler. The key is passed at run time and never enters the
-image. Because a key is set, `/docs`, `/redoc` and `/openapi.json` are not published: a
-protected deployment does not advertise its request surface. The schema is still readable
-straight out of the image, with no server and no key:
+image. `/docs` is there, behind that key: open it in a browser and answer the prompt with
+any username and the key as the password. Swagger UI then loads and reads `/openapi.json`
+with the same credentials.
+
+The schema is also readable straight out of the image, with no server and no key at all:
 
 ```bash
 docker run --rm -e HOST=127.0.0.1 --entrypoint python \
@@ -164,7 +168,7 @@ docker run --rm -e HOST=127.0.0.1 --entrypoint python \
 ```
 
 `HOST=127.0.0.1` is what lets it build the app without a key; nothing listens, so nothing is
-exposed. "Options and privacy" below documents the same surface in prose.
+exposed.
 
 `.env.example` sets `BIND_ADDRESS=127.0.0.1`, so the port is published on loopback.
 Port 8000 is crowded on most machines; `HOST_PORT=8188 docker compose up -d` moves the

@@ -39,7 +39,7 @@ environment editor does nothing useful; they belong in a `.env` beside the compo
 |---|---|---|
 | `HOST` | `127.0.0.1` | Address the service binds. Anything other than `127.0.0.1`, `::1` or `localhost` requires `API_KEY`. |
 | `PORT` | `8000` | Port the service binds. |
-| `API_KEY` | *(empty)* | Bearer token for `/crawl`, `/crawl/batch`, `/jobs`, `/stats` and `/metrics`. Setting it also withholds `/docs`, `/redoc` and `/openapi.json`, so a protected deployment does not publish its request surface. `/` and `/health` stay public. |
+| `API_KEY` | *(empty)* | Bearer token for `/crawl`, `/crawl/batch`, `/jobs`, `/stats` and `/metrics`. It also protects `/docs`, `/redoc` and `/openapi.json`, which additionally accept it as the password of an HTTP Basic prompt so a browser can reach Swagger UI; the username is not checked. `/` and `/health` stay public. |
 | `MAX_REQUEST_BYTES` | `1048576` | Request bodies above this are answered 413 before authentication. |
 | `INBOUND_RATE_LIMIT_RPS` | `0` | Crawl requests per second after authentication, `0` for off. Every URL costs one token, also inside a batch. |
 | `INBOUND_RATE_LIMIT_BURST` | `20` | Size of that token bucket. |

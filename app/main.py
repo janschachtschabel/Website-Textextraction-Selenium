@@ -10,8 +10,9 @@ import secrets
 from contextlib import asynccontextmanager
 
 from fastapi import Body, FastAPI, HTTPException, Path, Security
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse, Response
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBasic, HTTPBasicCredentials, HTTPBearer
 from loguru import logger
 
 from . import __version__
@@ -96,6 +97,52 @@ def _authenticator(config):
     return check_auth
 
 
+def _docs_authenticator(config):
+    """Bearer for tools, Basic for people.
+
+    A browser cannot put a bearer token on a navigation, so behind Bearer alone the Swagger
+    page would be unreachable by the only client that can use it. Basic makes the browser
+    ask, and it then repeats the credentials for the page's own fetch of /openapi.json.
+    The username is not checked; the password is the API key.
+    """
+    bearer = HTTPBearer(auto_error=False)
+    basic = HTTPBasic(auto_error=False)
+
+    def check_docs_auth(
+        token: HTTPAuthorizationCredentials | None = Security(bearer),
+        password: HTTPBasicCredentials | None = Security(basic),
+    ):
+        if not config.api_key:
+            return
+        supplied = token.credentials if token else (password.password if password else "")
+        if not secrets.compare_digest(supplied.encode(), config.api_key.encode()):
+            raise HTTPException(
+                401,
+                "Invalid or missing API token",
+                headers={"WWW-Authenticate": 'Basic realm="Website Text Extraction"'},
+            )
+
+    return check_docs_auth
+
+
+def _docs_routes(application, check_docs_auth):
+    """Registered by hand, because FastAPI's built-in docs routes take no dependency and
+    so can only be published or removed. These carry the same key as everything else."""
+    guard = [Security(check_docs_auth)]
+
+    @application.get("/openapi.json", include_in_schema=False, dependencies=guard)
+    async def openapi_document():
+        return application.openapi()
+
+    @application.get("/docs", include_in_schema=False, dependencies=guard)
+    async def swagger_ui():
+        return get_swagger_ui_html(openapi_url="/openapi.json", title=f"{application.title} - Swagger UI")
+
+    @application.get("/redoc", include_in_schema=False, dependencies=guard)
+    async def redoc():
+        return get_redoc_html(openapi_url="/openapi.json", title=f"{application.title} - ReDoc")
+
+
 def _admission(config):
     limit = (
         InboundLimit(config.inbound_rate_limit_rps, config.inbound_rate_limit_burst)
@@ -118,8 +165,9 @@ def _public_routes(application, config):
     @application.get("/", summary="Service banner")
     async def root():
         """Name, version and the path to this documentation. Public, so a probe can identify
-        the service without holding a key."""
-        return {"service": "Website Text Extraction", "version": __version__, "docs": application.docs_url}
+        the service without holding a key. The path is named even when the documentation
+        behind it needs one: naming it costs nothing that guessing it does not."""
+        return {"service": "Website Text Extraction", "version": __version__, "docs": "/docs"}
 
     @application.get("/health", summary="Liveness, capacity and browser presence")
     async def health():
@@ -264,16 +312,17 @@ def _job_routes(application, config, admit, check_auth):
 
 
 def create_app(config=settings, resources=None):
-    # A key-protected deployment does not advertise its request surface.
+    # The built-in docs routes are off because they cannot be protected; _docs_routes
+    # registers the same three paths behind the API key instead.
     application = FastAPI(
         title="Website Text Extraction — Selenium",
         version=__version__,
         summary="Web pages as Markdown, with an optional browser for JavaScript sites",
         description=DESCRIPTION,
         lifespan=_lifespan(config, resources),
-        docs_url=None if config.api_key else "/docs",
-        redoc_url=None if config.api_key else "/redoc",
-        openapi_url=None if config.api_key else "/openapi.json",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
     )
     application.add_middleware(BodySizeLimit, max_bytes=config.max_request_bytes)
     application.add_middleware(RequestId)  # added last, so it runs first and tags every answer
@@ -285,6 +334,7 @@ def create_app(config=settings, resources=None):
         return JSONResponse({"detail": str(exc)}, status_code=exc.status_code)
 
     _public_routes(application, config)
+    _docs_routes(application, _docs_authenticator(config))
     _observability_routes(application, check_auth)
     _crawl_routes(application, config, admit, check_auth)
     _job_routes(application, config, admit, check_auth)

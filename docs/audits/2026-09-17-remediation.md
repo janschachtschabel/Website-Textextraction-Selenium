@@ -19,7 +19,7 @@ on Python 3.13.15.
 | A09 | HTML parsed up to three times | Fixed: routing parse removed outside auto mode, and inside it whenever the extraction proves the page is not a shell | `d56f751`, `ed9dfea` |
 | A10 | Dead helpers contradicting documented behaviour | Fixed: removed, rest moved to `app/links.py` | `1761823` |
 | A11 | Dev cap blocks a cryptography fix | Fixed: `cryptography>=50`, no upper bound | `6bdf614` |
-| A12 | Public docs with a key configured | Fixed: docs routes off when `API_KEY` is set | `3ed0816` |
+| A12 | Public docs with a key configured | Fixed: docs routes off when `API_KEY` is set; superseded in 2.2.0, where they are served behind that key instead of removed | `3ed0816` |
 | A13 | nginx example serves plain HTTP without rate limits | Fixed: HTTPS-first example, zones in a separate include | `25ebd38` |
 | A14 | Loopback egress guards accept any local client | Documented: single-tenant host assumption in the README | `25ebd38` |
 | A15 | Batch orchestration in the API factory | Fixed: `CrawlService.crawl_batch` | `5635274` |
@@ -66,8 +66,10 @@ on Python 3.13.15.
   the code that bounds a decompression bomb. `C90` is now part of `ruff check` with
   `max-complexity = 10`, so this cannot creep back unnoticed a second time.
 - **Coverage for spawned workers.** Closed in 0.8.0: idle workers exit on request instead of
-  being killed, so coverage.py's multiprocessing support can measure them. The suite covers
-  92 % of `app/`, against 81 % counting only the main process.
+  being killed, so coverage.py's multiprocessing support can measure them. It covered 92 %
+  of `app/` then, against 81 % counting only the main process. Measured again in 2.1.1: 93 %
+  and 92 %. The two have converged because the unit tests now reach most of the conversion
+  and browser modules in-process as well.
 - **Live parameter harness.** The 140-case run against real sites still lives outside the
   repository; moving it in as an opt-in job (`RUN_LIVE_TESTS=1`) remains open.
 - **Python 3.14.** Tested and supported since 0.8.0: the unit and real-Chrome suites pass on

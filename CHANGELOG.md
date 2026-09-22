@@ -3,6 +3,34 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## 2.2.0 - 2026-09-22
+
+### Changed - the interactive documentation is protected, not removed
+
+Since 0.4.0 a configured `API_KEY` deleted `/docs`, `/redoc` and `/openapi.json`. That
+closed `A12` of the audit of 17 September, where FastAPI's defaults had published them
+without authentication - but it answered "do not publish this to everyone" with "publish it
+to no one", including the operator. A deployment that only has the image had no way to read
+its own schema.
+
+They are served again, behind the same key:
+
+- **A bearer token** works, as it does everywhere else in this service.
+- **HTTP Basic** works too, and that is the point. A browser cannot put a bearer token on a
+  navigation, so behind Bearer alone the Swagger page would be unreachable by the only
+  client that can use it. Answer the browser's prompt with any username and the key as the
+  password; Swagger UI then loads and fetches `/openapi.json` with the same credentials.
+- Without a key configured they stay public, unchanged.
+- A 401 carries `WWW-Authenticate: Basic realm="Website Text Extraction"`, which is what
+  makes the browser ask.
+
+FastAPI's built-in docs routes take no dependency, so they can only be published or
+removed; `_docs_routes` registers the same three paths by hand instead.
+
+`GET /` now reports `"docs": "/docs"` whether or not a key is set. It used to be `null`
+behind a key. The path is public, what it serves is not - and naming it costs nothing that
+guessing it does not.
+
 ## 2.1.2 - 2026-09-22
 
 ### Changed - the settings example is plain rows, and the explanations moved to docs

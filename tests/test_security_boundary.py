@@ -74,9 +74,40 @@ async def _request(app, method, path, **kwargs):
 
 
 @pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
-async def test_interactive_docs_are_hidden_when_a_key_is_configured(path):
+async def test_interactive_docs_need_the_key_when_one_is_configured(path):
+    """Withheld from anyone without the key, and the browser is told how to supply it."""
     response = await _request(create_app(replace(LOCAL, api_key="token")), "GET", path)
-    assert response.status_code == 404
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"].startswith("Basic")
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
+async def test_a_browser_reaches_the_docs_with_the_key_as_a_basic_password(path):
+    """A browser cannot put a bearer token on a navigation, so Basic is what makes the
+    Swagger page reachable at all; the username is not checked."""
+    app = create_app(replace(LOCAL, api_key="token"))
+    response = await _request(app, "GET", path, auth=("anything", "token"))
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
+async def test_a_tool_reaches_the_docs_with_a_bearer_token(path):
+    app = create_app(replace(LOCAL, api_key="token"))
+    response = await _request(app, "GET", path, headers={"authorization": "Bearer token"})
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("credentials", [("anyone", "wrong"), ("anyone", "")])
+async def test_the_docs_refuse_the_wrong_key(credentials):
+    app = create_app(replace(LOCAL, api_key="token"))
+    assert (await _request(app, "GET", "/openapi.json", auth=credentials)).status_code == 401
+
+
+async def test_the_protected_schema_is_the_whole_schema():
+    """Authenticating must return the document itself, not an empty stand-in."""
+    app = create_app(replace(LOCAL, api_key="token"))
+    response = await _request(app, "GET", "/openapi.json", auth=("anyone", "token"))
+    assert "/crawl" in response.json()["paths"]
 
 
 @pytest.mark.parametrize("path", ["/docs", "/openapi.json"])
@@ -129,10 +160,11 @@ async def test_streamed_body_is_capped_without_a_content_length():
     assert messages[0]["status"] == 413
 
 
-@pytest.mark.parametrize("key, advertised", [(None, "/docs"), ("token", None)])
-async def test_root_advertises_the_docs_only_while_they_exist(key, advertised):
+@pytest.mark.parametrize("key", [None, "token"])
+async def test_root_always_points_at_the_docs_because_they_always_exist(key):
+    """The path is public; what it serves is not. Naming it costs nothing a guess does not."""
     response = await _request(create_app(replace(LOCAL, api_key=key)), "GET", "/")
-    assert response.json()["docs"] == advertised
+    assert response.json()["docs"] == "/docs"
 
 
 def _upload_scope():

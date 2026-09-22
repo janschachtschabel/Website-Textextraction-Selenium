@@ -67,7 +67,7 @@ def test_the_image_installs_from_the_lockfile_and_checks_the_hashes():
 
 
 def test_the_example_env_names_every_setting_the_service_reads():
-    """.env.example is the operator's reference, and the only one once a key hides /docs."""
+    """.env.example is the operator's reference for what a deployment can be told."""
     readers = re.compile(r"(?:os\.getenv|os\.environ\.get|_bool)\(\s*[\"']([A-Z0-9_]+)[\"']")
     sources = [*sorted((ROOT / "app").rglob("*.py")), ROOT / "run.py"]
     read = {name for source in sources for name in readers.findall(source.read_text("utf-8"))}
