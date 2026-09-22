@@ -95,7 +95,7 @@ See the [Chromium sandbox documentation](https://chromium.googlesource.com/chrom
 CI uses the runner's packaged Chrome and matching ChromeDriver, and checks that
 Chrome starts with sandboxing enabled before running browser fixtures.
 
-## Run in Docker on Debian 13
+## Run in Docker
 
 The image is built on Debian 13 (trixie) and takes Chromium and its driver from the
 distribution, which ships them as a matched pair - a Chrome fetched separately drifts out
@@ -118,6 +118,22 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.
 sudo apt-get update
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 ```
+
+### Run the published image
+
+Nothing to clone and nothing to build:
+
+```bash
+API_KEY=$(openssl rand -hex 24)
+docker run --rm --init -p 127.0.0.1:8000:8000 -e API_KEY \
+  jschachtschabel/website-textextraction:latest
+```
+
+Ready in about four seconds, and `mode=js` answers through the Chromium inside it. `--init`
+reaps the helpers Chrome leaves behind. The result cache lives in the container and goes
+with it; mount a volume at `/var/cache/website-text-extraction` to keep it, as
+`docker-compose.yml` does. `latest` is right here because the container is thrown away
+again - a deployment pins a version instead, which is what that compose file does.
 
 ### Build and start
 
