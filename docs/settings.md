@@ -74,7 +74,9 @@ concurrency at once and start collecting `503 Crawl queue is full`.
 While it runs, `GET /jobs/{job_id}` reports `progress` - how many URLs are finished and how
 many produced a result. Three things this does **not** do, and they matter at this size:
 
-- the result is one JSON record, built in memory and written when the batch ends
+- the result is one JSON record, built in memory and written when the batch ends. Measured
+  at 2000 URLs: 22 MB where pages yield 10 KB of Markdown, 63 MB at 30 KB, 165 MB at 80 KB -
+  per job, per worker process, held until it finishes. `MAX_ACTIVE_JOBS` multiplies it
 - per-URL *results* arrive only with that record; progress is counts
 - a container restart loses an unfinished job, which is then reported `failed`
 
