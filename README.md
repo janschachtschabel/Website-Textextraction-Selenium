@@ -202,7 +202,7 @@ pinned to a version rather than `latest`, so an unattended pull never changes wh
 update by editing the tag, or point the panel at a tag of this repository instead of
 `main`.
 
-The image is `janschachtschabel/website-textextraction` on Docker Hub, built and pushed by
+The image is `jschachtschabel/website-textextraction` on Docker Hub, built and pushed by
 `.github/workflows/publish.yml` when a `v*` tag is pushed. It is smoke-tested before it is
 pushed: the workflow starts it, calls `/health`, and crawls a page through Chrome.
 

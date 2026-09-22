@@ -16,7 +16,7 @@ services:
   extraction:
     # Pinned, not :latest - an unattended pull should never change the version running.
     # tests/test_packaging.py keeps this level with app/__init__.py.
-    image: janschachtschabel/website-textextraction:2.1.0
+    image: jschachtschabel/website-textextraction:2.1.0
     # Chrome forks helpers that outlive a crash; without an init they accumulate as
     # zombies until the container hits its process limit.
     init: true

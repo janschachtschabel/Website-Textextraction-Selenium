@@ -13,7 +13,7 @@ permissions:
 env:
   # Written out rather than taken from the secret, so the logs name what was pushed and
   # docker-compose.yml can be checked against it. Only the credentials are secret.
-  IMAGE: janschachtschabel/website-textextraction
+  IMAGE: jschachtschabel/website-textextraction
 
 jobs:
   image:

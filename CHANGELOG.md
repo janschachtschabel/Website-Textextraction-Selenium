@@ -16,7 +16,7 @@ Before either mattered it aborted on `${API_KEY:?set API_KEY in .env}`, which is
 when compose reads the file and cannot be answered by a panel variable, with a message
 asking for a file the operator has no way to create.
 
-- The image is published to Docker Hub as `janschachtschabel/website-textextraction`, built
+- The image is published to Docker Hub as `jschachtschabel/website-textextraction`, built
   and pushed by `.github/workflows/publish.yml` on a `v*` tag. The workflow refuses a tag
   that disagrees with `__version__`, and starts the image and crawls a page through Chrome
   before pushing it, so a broken image is never published.
