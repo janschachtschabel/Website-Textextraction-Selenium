@@ -22,7 +22,9 @@ refused to start however the panel was configured.
   file - and a checkout still fails early and by name through
   `docker-compose.override.yml`.
 
-The image is unchanged; 2.1.1 republishes it so the pinned tag and `__version__` agree.
+Only `docker-compose.yml` needed the fix, but 2.1.1 is a new image all the same: the
+Dockerfile copies `app/` in, so the version the service reports at `/` travels with it.
+The published digests differ, `sha256:518971b0…` against 2.1.0's `sha256:983a041b…`.
 
 ## 2.1.0 - 2026-09-21
 
