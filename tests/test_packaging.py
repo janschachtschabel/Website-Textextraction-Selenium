@@ -105,3 +105,12 @@ def test_a_checkout_still_builds_its_working_tree():
     image instead of the change being tested."""
     override = without_comments("docker-compose.override.yml")
     assert "build:" in override and "API_KEY" in override
+
+
+def test_the_settings_example_is_plain_rows_anything_can_paste():
+    """A panel's variable editor reads one NAME=VALUE per row and has no idea what a # line
+    is. Six comments here became six invalid entries in one, and the explanations moved to
+    docs/settings.md so this file can stay pasteable."""
+    lines = (ROOT / ".env.example").read_text("utf-8").splitlines()
+    unpastable = [line for line in lines if not re.fullmatch(r"[A-Z][A-Z0-9_]*=.*", line)]
+    assert not unpastable, f".env.example holds rows that are not NAME=VALUE: {unpastable}"

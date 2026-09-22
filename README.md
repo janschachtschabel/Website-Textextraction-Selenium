@@ -152,8 +152,19 @@ so this runs the working tree rather than the published image.
 `API_KEY` is required. The container binds to `0.0.0.0`, and the service refuses any
 non-loopback address without a key, so a missing one stops the stack before it starts
 rather than exposing an open crawler. The key is passed at run time and never enters the
-image. Because a key is set, `/docs` is not published - read the schema from a local
-keyless run, as under "Install and run".
+image. Because a key is set, `/docs`, `/redoc` and `/openapi.json` are not published: a
+protected deployment does not advertise its request surface. The schema is still readable
+straight out of the image, with no server and no key:
+
+```bash
+docker run --rm -e HOST=127.0.0.1 --entrypoint python \
+  jschachtschabel/website-textextraction:latest \
+  -c "import json; from app.main import create_app; print(json.dumps(create_app().openapi(), indent=2))" \
+  > openapi.json
+```
+
+`HOST=127.0.0.1` is what lets it build the app without a key; nothing listens, so nothing is
+exposed. "Options and privacy" below documents the same surface in prose.
 
 `.env.example` sets `BIND_ADDRESS=127.0.0.1`, so the port is published on loopback.
 Port 8000 is crowded on most machines; `HOST_PORT=8188 docker compose up -d` moves the
@@ -206,19 +217,27 @@ so nothing may need a build context:
 https://raw.githubusercontent.com/janschachtschabel/Website-Textextraction-Selenium/main/docker-compose.yml
 ```
 
-Add one environment variable in the panel, `API_KEY`, with a value of your own. That is
-all: `docker-compose.yml` pulls a published image, names no build, and passes `API_KEY`
-through to the container with an empty default.
+Add **one** environment variable in the panel: `API_KEY`, with a value of your own. That is
+the whole configuration.
 
-Two things are worth knowing. A panel's variables reach compose as *substitution*, usually
-by being written to a `.env` beside the file, and compose does not pass those into
-containers by itself - so a variable has to be named in `environment:` to arrive at all.
-`API_KEY` is, with an empty default rather than the required form, because a required one
-aborts while compose reads the file and asks for a `.env` you cannot write. With the empty
-default the container starts and says it in its own log: "Set API_KEY before binding HOST
-to a non-loopback address". And the image is pinned to a version rather than `latest`, so
-an unattended pull never changes what runs; update by editing the tag, or point the panel
-at a tag of this repository instead of `main`.
+One, not the contents of `.env.example`. That file is the defaults for a `.env` beside a
+checkout, and two of its rows must never reach a container: `API_KEY=` is empty there, which
+stops the service with "Set API_KEY before binding HOST to a non-loopback address", and
+`HOST=127.0.0.1` makes it listen on the container's own loopback, where the published port
+reaches nothing. `BIND_ADDRESS` and `HOST_PORT` are read by compose rather than the service,
+so setting them in a panel does nothing. [docs/settings.md](docs/settings.md) explains every
+setting and which of them a container must leave alone.
+
+Two things are worth knowing about the file itself. A panel's variables reach compose as
+*substitution*, usually by being written to a `.env` beside it, and compose does not pass
+those into containers by itself - so a variable has to be named under `environment:` to
+arrive at all. `API_KEY` is named there without a value, which takes whatever the panel
+provides and leaves the variable unset when nothing does, rather than setting it to empty
+and overwriting a value a panel might inject by another route. A required `${API_KEY:?...}`
+is what this cannot be: that aborts while compose reads the file, asking for a `.env` you
+have no way to write. And the image is pinned to a version rather than `latest`, so an
+unattended pull never changes what runs; update by editing the tag, or point the panel at a
+tag of this repository instead of `main`.
 
 The image is `jschachtschabel/website-textextraction` on Docker Hub, built and pushed by
 `.github/workflows/publish.yml` when a `v*` tag is pushed. It is smoke-tested before it is
@@ -352,7 +371,9 @@ that is reported as lost 30 seconds after its deadline.
 ## Options and privacy
 
 Omitted/null configurable options inherit `.env` values. Explicit `false` and `0`
-remain overrides. `.env.example` lists all supported settings.
+remain overrides. [docs/settings.md](docs/settings.md) documents every setting and its
+default; `.env.example` is the same list as plain `NAME=VALUE` rows, without comments, so
+it can be pasted into an editor that only understands that form.
 
 - `html_converter`: `trafilatura` (default), `markitdown`, or `bs4`. Trafilatura
   output starts with the page's first visible `<h1>`, also when it sits outside

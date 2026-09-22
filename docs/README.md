@@ -27,6 +27,8 @@ Two kinds of entry are worth knowing about before reading them:
 
 ## The rest
 
+- [settings.md](settings.md) - every environment variable the service reads, its default,
+  and the three that behave differently inside a container.
 - [migration-0.3.md](migration-0.3.md) - what a caller of the pre-audit code has to change.
 - [plans/2026-09-15-audit-remediation.md](plans/2026-09-15-audit-remediation.md) - the plan
   the first remediation was worked against.

@@ -1,0 +1,122 @@
+# Settings
+
+Every environment variable the service reads, with its default. The defaults are the ones
+in [`.env.example`](../.env.example), which is a plain `NAME=VALUE` list on purpose so it can
+be pasted anywhere - the explanations live here instead of in comments beside them.
+
+All of them are validated at startup. An invalid value stops the service with a message
+naming the setting, rather than failing later on a request.
+
+## How to supply them
+
+- **Running it directly:** copy `.env.example` to `.env` beside `run.py`.
+- **A container:** pass what you want to change, `docker run -e API_KEY=...`, or name it in
+  the compose file's `environment:`.
+- **A panel that deploys a compose file:** set them in the panel's environment editor.
+
+Requests may override some of these per crawl; see "Options and privacy" in the
+[README](../README.md). An omitted or null option inherits the value here, while an explicit
+`false` or `0` in a request is an override.
+
+## In a container, three rules differ
+
+**Do not set `HOST` or `PORT`.** The image sets them to `0.0.0.0` and `8000`, and the
+container's own network namespace is what makes that safe. `HOST=127.0.0.1` inside a
+container means the service listens on the *container's* loopback, where a published port
+reaches nothing - the container starts, looks healthy from the outside, and refuses every
+connection.
+
+**`API_KEY` is required.** The service refuses to start on a non-loopback address without
+one, so every container needs it. An empty value counts as missing.
+
+**`BIND_ADDRESS` and `HOST_PORT` are read by docker compose, not by the service.** They
+decide where the container's port 8000 is published on the host. Setting them in a panel's
+environment editor does nothing useful; they belong in a `.env` beside the compose file.
+
+## Binding and access
+
+| Setting | Default | What it does |
+|---|---|---|
+| `HOST` | `127.0.0.1` | Address the service binds. Anything other than `127.0.0.1`, `::1` or `localhost` requires `API_KEY`. |
+| `PORT` | `8000` | Port the service binds. |
+| `API_KEY` | *(empty)* | Bearer token for `/crawl`, `/crawl/batch`, `/jobs`, `/stats` and `/metrics`. Setting it also withholds `/docs`, `/redoc` and `/openapi.json`, so a protected deployment does not publish its request surface. `/` and `/health` stay public. |
+| `MAX_REQUEST_BYTES` | `1048576` | Request bodies above this are answered 413 before authentication. |
+| `INBOUND_RATE_LIMIT_RPS` | `0` | Crawl requests per second after authentication, `0` for off. Every URL costs one token, also inside a batch. |
+| `INBOUND_RATE_LIMIT_BURST` | `20` | Size of that token bucket. |
+| `BIND_ADDRESS` | `127.0.0.1` | **docker compose only.** Host address the container's port is published on. The compose file fetched by itself defaults to `0.0.0.0`. |
+| `HOST_PORT` | `8000` | **docker compose only.** Host port the container's 8000 is published on. |
+
+## Logging
+
+| Setting | Default | What it does |
+|---|---|---|
+| `LOG_LEVEL` | `INFO` | Standard Python level name. |
+| `LOG_JSON` | `false` | One JSON object per line instead of readable text. Neither sink includes exception variable values. |
+
+## Crawl defaults
+
+Each of these is what a request gets when it does not say otherwise.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `DEFAULT_MODE` | `auto` | `fast` never starts a browser, `js` always does, `auto` starts one only when the plain HTML yields too little text. |
+| `DEFAULT_TIMEOUT_SECONDS` | `120` | Deadline for one URL, including retries and cleanup. |
+| `DEFAULT_RETRIES` | `1` | Retries after a transient failure. Certificate and policy errors are never retried. |
+| `DEFAULT_MAX_BYTES` | `10485760` | Largest response body read per URL, after decompression. |
+| `DEFAULT_USER_AGENT` | *(empty)* | Empty uses `WebsiteTextExtraction/<version>` with the project URL. Keep a contact URL in your own value: sites with a bot policy block anonymous crawlers, and Wikimedia answers 403. |
+| `DEFAULT_ACCEPT_LANGUAGE` | *(empty)* | `Accept-Language` for every crawl; empty sends none. Example: `de,en;q=0.8`. |
+| `RESPECT_ROBOTS_TXT` | `false` | Check robots.txt before each crawl (RFC 9309). |
+| `DEFAULT_HEADLESS` | `true` | Run Chrome headless. |
+| `DEFAULT_JS_STRATEGY` | `speed` | `speed` also drops images, fonts and media, which it can only do when no screenshot is wanted. `accuracy` loads everything. |
+| `DEFAULT_JS_AUTO_WAIT` | `true` | Wait for the page to settle rather than returning at load. |
+| `HTML_CONVERTER` | `trafilatura` | First converter to try: `trafilatura`, `markitdown` or `bs4`. The others follow as fallbacks. |
+| `TRAFILATURA_CLEAN_MARKDOWN` | `true` | Extract the main content. `false` converts the whole document. |
+| `MEDIA_CONVERSION_POLICY` | `skip` | `skip`/`none` ignore audio and video, `metadata` reads their tags. `full` is not implemented and is refused as unsupported. |
+| `ALLOW_INSECURE_SSL` | `false` | Accept invalid certificates. |
+| `SSRF_PROTECTION` | `true` | Validate every hop and every connection against private and link-local address ranges. Leave it on. |
+
+## Capacity
+
+These are per Uvicorn process, so multiply by `UVICORN_WORKERS`.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `UVICORN_WORKERS` | `1` | Worker processes serving HTTP. |
+| `MAX_CONCURRENT_REQUESTS` | `8` | URLs processed at once. |
+| `MAX_QUEUE_SIZE` | `50` | URLs waiting for capacity before new ones are refused. |
+| `QUEUE_TIMEOUT_SECONDS` | `60` | How long a URL waits for capacity before it fails. |
+| `MAX_ACTIVE_JOBS` | `10` | Unfinished background jobs (`POST /jobs`) per process. |
+| `JOB_RESULT_TTL` | `3600` | Seconds a finished job's result stays readable. |
+| `HTTP_MAX_CONNECTIONS` | `16` | Connection pool for the HTTP fetcher. |
+| `SELENIUM_MAX_POOL_SIZE` | `2` | Browser worker processes. None start until a browser job arrives. |
+| `CONVERSION_WORKERS` | `2` | Conversion worker processes. |
+| `WORKER_MAX_JOBS` | `100` | A worker is replaced after this many successful jobs, which bounds memory growth. |
+
+## Browser
+
+| Setting | Default | What it does |
+|---|---|---|
+| `CHROME_BINARY` | *(empty)* | Path to Chrome or Chromium. Empty lets Selenium Manager locate or download one; preinstall a matching pair in production. |
+| `CHROMEDRIVER_PATH` | *(empty)* | Path to the matching driver. |
+| `SELENIUM_NO_SANDBOX` | `false` | Runs Chrome without its own sandbox. The image sets this to `true` because Docker's seccomp profile blocks the namespaces that sandbox needs; the container is the boundary instead. Outside a container, turn it on only for something like a root-owned Colab runtime. |
+
+## Cache and politeness
+
+| Setting | Default | What it does |
+|---|---|---|
+| `RESULT_CACHE_DIR` | *(empty)* | Where results are cached. Empty uses `$XDG_CACHE_HOME/website-text-extraction` or `~/.cache/website-text-extraction`. All Uvicorn workers on one machine must share it, and the service refuses a directory that is not private to its user. |
+| `RESULT_CACHE_TTL` | `300` | Seconds a result is served from cache. |
+| `RESULT_CACHE_MAX_SIZE` | `200` | Entries kept. |
+| `REVALIDATION_TTL` | `86400` | Seconds an HTTP result stays available for a conditional request with `ETag`/`Last-Modified`; `0` for off. |
+| `GLOBAL_RATE_LIMIT_RPS` | `0` | Document attempts per second across all hosts, `0` for off. Counts HTTP retries and redirects and the browser's initial navigation, not the browser's own subrequests. |
+| `DEFAULT_DOMAIN_RATE_LIMIT_RPS` | `0` | Per-host attempts per second. Above `0` this is a ceiling: a request may lower it, never raise it. |
+
+## PII removal
+
+Only used with `pip install -e '.[pii]'` and the matching spaCy models. A model is loaded on
+first use, never downloaded while a request is running.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `PRESIDIO_DE_MODEL` | `de_core_news_lg` | German model for `anonymize`. |
+| `PRESIDIO_EN_MODEL` | `en_core_web_lg` | English model. |
