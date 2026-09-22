@@ -3,6 +3,51 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## 2.1.2 - 2026-09-22
+
+### Changed - the settings example is plain rows, and the explanations moved to docs
+
+A deployment through Hostinger's Docker Manager pulled the image, started, and then
+restarted in a loop on "Set API_KEY before binding HOST to a non-loopback address".
+`.env.example` had been pasted into the panel's environment-variable editor - which the
+README invited by calling that file the list of every supported setting. A panel reads one
+`NAME=VALUE` per row and has no idea what a `#` line is, so six comments became invalid
+entries, and two real rows arrived that must never reach a container: `API_KEY=`, empty,
+which is exactly what stopped the service, and `HOST=127.0.0.1`, which would have made it
+listen on the container's own loopback where the published port reaches nothing.
+
+- `.env.example` is now 46 plain `NAME=VALUE` rows: no comments, and no blank lines either,
+  since an editor that trips over one trips over the other. A test keeps it that way.
+- [`docs/settings.md`](docs/settings.md) is new and carries what those comments said, plus
+  what they never did: which settings a container must leave alone, and why. `HOST` and
+  `PORT` come from the image; `BIND_ADDRESS` and `HOST_PORT` are read by compose rather than
+  the service. A container needs exactly one variable set in a panel: `API_KEY`.
+- The README points there instead of describing `.env.example` as the reference, and the
+  panel section says up front that one variable is the whole configuration.
+
+### Added - the schema is readable without a server
+
+With `API_KEY` set, `/docs`, `/redoc` and `/openapi.json` are withheld, and the README's
+answer was a keyless local run - which a deployment that only has the image cannot do. One
+command now prints the schema out of the image itself, no server and no key:
+
+    docker run --rm -e HOST=127.0.0.1 --entrypoint python \
+      jschachtschabel/website-textextraction:latest \
+      -c "import json; from app.main import create_app; print(json.dumps(create_app().openapi()))"
+
+### Changed - API_KEY is declared without a value
+
+`environment: [API_KEY]` rather than `API_KEY: ${API_KEY:-}`. Both take the value from
+whatever the panel provides, but they differ when nothing does: the empty default *sets* the
+variable to an empty string, while the valueless form leaves it unset. Measured with
+`docker compose config`: `API_KEY: ""` against `API_KEY: null`. Unset is the safer of the
+two, because it cannot overwrite a value a panel injects by a route compose does not see.
+Verified for all five cases that matter - panel with a key, panel with an empty key, panel
+with nothing, checkout without a `.env`, checkout with one.
+
+The service is unchanged; 2.1.2 exists so the pinned image, `__version__` and this file
+agree.
+
 ## 2.1.1 - 2026-09-22
 
 ### Fixed - the panel's API_KEY now reaches the container

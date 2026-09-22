@@ -1,31 +1,34 @@
-# Deployable as it stands. A panel that takes a compose URL - Hostinger's Docker Manager,
-# Portainer, Coolify - fetches only this file, so nothing here may need a build context or
-# a checkout. It pulls a published image instead.
+# Deployable as it stands. A panel that deploys from the URL of a compose file - Hostinger's
+# Docker Manager, Portainer, Coolify - fetches only this file and pulls the image it names,
+# so nothing here may need a build context or a checkout.
 #
-# Set API_KEY as an environment variable in the panel. A panel's variables reach compose
-# as substitution - commonly by writing them to a .env beside this file - and compose does
-# not pass those into containers by itself, so API_KEY has to be named below to arrive at
-# all. The empty default is what makes it deployable: the :? form would abort while compose
-# reads the file, asking for a .env the operator has no way to write. Empty instead lets
-# the container start and say it plainly in its log: "Set API_KEY before binding HOST to a
-# non-loopback address".
+# In the panel set exactly one variable: API_KEY, with a value. Not HOST or PORT, which come
+# from the image - HOST=127.0.0.1 would make the service listen on the container's own
+# loopback, where the published port reaches nothing. And do not paste .env.example there:
+# it is written for a .env file, a panel reads one NAME=VALUE per row, so its comment lines
+# become invalid entries and its empty API_KEY= stops the service.
 #
-# A clone of this repository builds instead of pulling: docker-compose.override.yml adds
-# the build, and compose merges it automatically. Its .env supplies the key and, from
-# .env.example, BIND_ADDRESS=127.0.0.1.
+# API_KEY is named below without a value. Compose then takes whatever the panel provides and
+# leaves the variable unset when nothing does, rather than setting it to empty and
+# overwriting a value injected by another route. The required form ${API_KEY:?...} is what
+# it cannot be: that aborts while compose reads the file, asking for a .env the operator has
+# no way to write. Unset, the container starts and names what is missing in its own log.
+#
+# A clone builds instead of pulling: docker-compose.override.yml adds the build, and compose
+# merges it automatically. Its .env supplies the key and BIND_ADDRESS=127.0.0.1.
 services:
   extraction:
     # Pinned, not :latest - an unattended pull should never change the version running.
     # tests/test_packaging.py keeps this level with app/__init__.py.
-    image: jschachtschabel/website-textextraction:2.1.1
+    image: jschachtschabel/website-textextraction:2.1.2
     # Chrome forks helpers that outlive a crash; without an init they accumulate as
     # zombies until the container hits its process limit.
     init: true
     environment:
-      # Empty when nothing names it; the override file replaces this in a checkout.
-      API_KEY: ${API_KEY:-}
-      LOG_JSON: "true"
-      UVICORN_WORKERS: "2"
+      # No value: taken from the panel or the environment, left unset when neither has it.
+      - API_KEY
+      - LOG_JSON=true
+      - UVICORN_WORKERS=2
     ports:
       # Reachable by default, because the deployment that cannot configure anything is the
       # one that needs it. What is published is key-protected: the service always binds
