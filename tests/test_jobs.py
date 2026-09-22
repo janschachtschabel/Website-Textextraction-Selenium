@@ -115,3 +115,59 @@ async def test_a_job_past_its_deadline_without_a_result_is_reported_lost(jobs_ap
         resources.state.set("job:orphan", orphan)
         body = (await client.get("/jobs/orphan")).json()
         assert body["status"] == "failed" and body["error"] == "Job lost: the process that ran it stopped"
+
+
+async def test_a_running_job_says_how_far_along_it_is(jobs_api):
+    """Without this a 2000-URL job answers "running" for an hour and then everything at
+    once, which is indistinguishable from a job that is stuck."""
+    async with jobs_api(delay=0.25) as (client, _):
+        urls = [f"https://example.com/{n}" for n in range(6)]
+        accepted = (await client.post("/jobs", json={"urls": urls, "max_concurrency": 2})).json()
+        seen = []
+        for _ in range(40):
+            body = (await client.get(accepted["status_url"])).json()
+            if body["progress"]:
+                seen.append(body["progress"]["done"])
+            if body["status"] in {"done", "failed"}:
+                break
+            await asyncio.sleep(0.1)
+        assert seen, "the job never reported any progress"
+        assert seen[-1] == 6, f"the finished job must count every URL, saw {seen}"
+        assert seen == sorted(seen), f"progress must not go backwards, saw {seen}"
+
+
+async def test_progress_counts_successes_apart_from_failures(jobs_api):
+    async with jobs_api() as (client, _):
+        urls = ["https://example.com/one", "https://example.com/blocked", "https://example.com/two"]
+        accepted = (await client.post("/jobs", json={"urls": urls})).json()
+        body = await finished(client, accepted["status_url"])
+        assert body["progress"] == {"done": 3, "succeeded": 2, "total": 3}
+        assert body["result"]["succeeded"] == 2 and body["result"]["failed"] == 1
+
+
+async def test_a_queued_job_already_names_its_size(jobs_api):
+    async with jobs_api(delay=0.2) as (client, _):
+        urls = [f"https://example.com/{n}" for n in range(4)]
+        accepted = (await client.post("/jobs", json={"urls": urls, "max_concurrency": 1})).json()
+        body = (await client.get(accepted["status_url"])).json()
+        assert body["progress"]["total"] == 4
+
+
+async def test_a_failing_progress_write_does_not_fail_the_job(jobs_api, monkeypatch):
+    """Progress is incidental; the crawling is the job. A busy state store must not turn a
+    batch that succeeded into a failure - the same rule B08 established for metrics."""
+    monkeypatch.setattr("app.jobs.PROGRESS_EVERY_SECONDS", 0.0)
+    async with jobs_api(delay=0.05) as (client, resources):
+        original = resources.jobs._save
+
+        async def refuse(job_id, record):
+            if record["status"] == "running" and record["progress"]["done"]:
+                raise RuntimeError("state store busy")
+            await original(job_id, record)
+
+        monkeypatch.setattr(resources.jobs, "_save", refuse)
+        urls = [f"https://example.com/{n}" for n in range(3)]
+        accepted = (await client.post("/jobs", json={"urls": urls})).json()
+        body = await finished(client, accepted["status_url"])
+        assert body["status"] == "done", body.get("error")
+        assert body["result"]["succeeded"] == 3

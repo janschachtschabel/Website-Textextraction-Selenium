@@ -10,9 +10,11 @@ naming the setting, rather than failing later on a request.
 ## How to supply them
 
 - **Running it directly:** copy `.env.example` to `.env` beside `run.py`.
-- **A container:** pass what you want to change, `docker run -e API_KEY=...`, or name it in
-  the compose file's `environment:`.
+- **A container:** pass what you want to change, `docker run -e API_KEY=...`.
 - **A panel that deploys a compose file:** set them in the panel's environment editor.
+  `docker-compose.yml` names every setting below without a value, so compose takes each from
+  whatever the panel provides and leaves out the ones nobody names. `HOST` and `PORT` are
+  the exception - see the next section.
 
 Requests may override some of these per crawl; see "Options and privacy" in the
 [README](../README.md). An omitted or null option inherits the value here, while an explicit
@@ -33,6 +35,34 @@ one, so every container needs it. An empty value counts as missing.
 decide where the container's port 8000 is published on the host. Setting them in a panel's
 environment editor does nothing useful; they belong in a `.env` beside the compose file.
 
+## Crawling in bulk
+
+The defaults suit interactive use: 50 URLs, ten minutes. A deployment that crawls thousands
+of pages per run raises three of them together, because they bind each other:
+
+```
+MAX_URLS_PER_REQUEST=2000
+MAX_TIMEOUT_SECONDS=7200
+DEFAULT_MAX_BYTES=2097152
+```
+
+`timeout_ms` covers the **whole** batch including queue time, so the deadline has to fit
+`URLs × seconds each ÷ max_concurrency`. With four browser workers and about nine seconds a
+page, 2000 URLs need roughly 75 minutes; `mode=fast` needs about two. `DEFAULT_MAX_BYTES`
+is in that list because 2000 results at the 10 MiB default is a 20 GB worst case.
+
+One big job is gentler on the service than many small ones. A job's own `max_concurrency`
+(at most 10) is applied *before* the service-wide capacity, so a 2000-URL job only ever
+presents ten URLs to the queue. Forty jobs of fifty would present forty times their own
+concurrency at once and start collecting `503 Crawl queue is full`.
+
+While it runs, `GET /jobs/{job_id}` reports `progress` - how many URLs are finished and how
+many produced a result. Three things this does **not** do, and they matter at this size:
+
+- the result is one JSON record, built in memory and written when the batch ends
+- per-URL *results* arrive only with that record; progress is counts
+- a container restart loses an unfinished job, which is then reported `failed`
+
 ## Binding and access
 
 | Setting | Default | What it does |
@@ -43,6 +73,8 @@ environment editor does nothing useful; they belong in a `.env` beside the compo
 | `MAX_REQUEST_BYTES` | `1048576` | Request bodies above this are answered 413 before authentication. |
 | `INBOUND_RATE_LIMIT_RPS` | `0` | Crawl requests per second after authentication, `0` for off. Every URL costs one token, also inside a batch. |
 | `INBOUND_RATE_LIMIT_BURST` | `20` | Size of that token bucket. |
+| `MAX_URLS_PER_REQUEST` | `50` | URLs one `/crawl/batch` or `/jobs` request may carry. Above it the request is refused with 422 naming the limit. Caps at 10000, which is roughly 600 KB of request body. |
+| `MAX_TIMEOUT_SECONDS` | `600` | Largest `timeout_ms` a request may ask for, and the ceiling `DEFAULT_TIMEOUT_SECONDS` must stay under. A request above it is refused rather than quietly cut short, because a batch clipped to a shorter deadline fails on its tail with nothing saying why. Caps at 86400. |
 | `BIND_ADDRESS` | `127.0.0.1` | **docker compose only.** Host address the container's port is published on. The compose file fetched by itself defaults to `0.0.0.0`. |
 | `HOST_PORT` | `8000` | **docker compose only.** Host port the container's 8000 is published on. |
 

@@ -3,6 +3,51 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## 2.3.0 - 2026-09-22
+
+### Added - the batch limits are the operator's, and a running job says how far it is
+
+50 URLs and a ten-minute deadline were constants. They suit interactive use and stand in
+the way of a deployment that crawls a few thousand pages per run.
+
+- `MAX_URLS_PER_REQUEST` (50) and `MAX_TIMEOUT_SECONDS` (600) are settings. The defaults are
+  what every earlier release enforced, so nothing changes until they are raised. A request
+  above either is refused with 422 naming the limit - refused rather than quietly clipped,
+  because a batch cut to a shorter deadline fails on its tail with nothing saying why.
+- The request model keeps structural ceilings of 10000 URLs and 24 hours that no setting may
+  exceed, and `__post_init__` refuses a setting above them at startup rather than leaving a
+  puzzling 422 for the first request.
+- `GET /jobs/{job_id}` carries `progress` while the job runs: `done`, `succeeded`, `total`.
+  Written at most every two seconds, so a 2000-URL job does not mean 2000 writes to a store
+  shared across processes; the save at the end always carries the final count. Per-URL
+  *results* still arrive only with the finished batch.
+- `GET /` and the job record gained a field, so `JobStatus` is now built with `.get`: a
+  record written by an earlier release predates it, and the state store outlives an upgrade.
+- A progress write that fails is logged, not raised. Found reading the change back: the
+  first version let a busy state store turn a batch that had crawled everything
+  successfully into `failed` - which is the defect `B08` fixed for metrics in 0.9.0, rebuilt
+  in a new place. Progress is incidental; the crawling is the job.
+
+`docs/settings.md` has a section on crawling in bulk - the three settings that have to move
+together, why one big job is gentler on the queue than many small ones, and the three things
+raising the limits does **not** solve: the result is still one JSON record written at the
+end, per-URL results still arrive only with it, and a restart still loses an unfinished job.
+
+### Changed - the compose file passes every setting through
+
+`docker-compose.yml` named three variables, so a panel deployment could set `API_KEY` and
+nothing else. It now names all 44 the service reads, each without a value: compose takes
+each from whatever the panel provides and leaves out the ones nobody names, so the image's
+defaults apply.
+
+`HOST` and `PORT` are deliberately absent. They come from the image, and `HOST=127.0.0.1`
+would make the service listen on the container's own loopback, where the published port
+reaches nothing.
+
+`LOG_JSON` and `UVICORN_WORKERS` keep the values this file has always set, written as
+`${LOG_JSON:-true}` and `${UVICORN_WORKERS:-2}` so they stay overridable without changing
+what an existing deployment gets.
+
 ## 2.2.1 - 2026-09-22
 
 ### Fixed - a repeat crawl of a CDN-hosted page failed for a day

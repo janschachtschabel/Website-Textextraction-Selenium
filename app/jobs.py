@@ -16,6 +16,10 @@ from .results import CrawlError
 
 KEY = "job:"
 LOST_AFTER_SECONDS = 30  # an unfinished job this far past its deadline has lost its process
+# Progress is written at most this often: a 2000-URL job would otherwise mean 2000 writes
+# to a store shared across processes. _run saves once more at the end, so the final count
+# is never the one the throttle swallowed.
+PROGRESS_EVERY_SECONDS = 2.0
 UNFINISHED = {"queued", "running"}
 
 
@@ -36,6 +40,7 @@ class JobRunner:
         self.tasks[job_id] = None  # reserved before the first await, so the bound holds
         record = {
             "status": "queued",
+            "progress": {"done": 0, "succeeded": 0, "total": len(urls)},
             "submitted_at": _now(),
             "deadline_at": time.time() + options.timeout_ms / 1000,
             "finished_at": None,
@@ -74,8 +79,24 @@ class JobRunner:
     async def _run(self, job_id, record, urls, options, max_concurrency):
         record["status"] = "running"
         await self._save(job_id, record)
+        written = time.monotonic()
+
+        async def report(done, succeeded):
+            nonlocal written
+            record["progress"] = {"done": done, "succeeded": succeeded, "total": len(urls)}
+            if time.monotonic() - written < PROGRESS_EVERY_SECONDS:
+                return
+            written = time.monotonic()
+            try:
+                await self._save(job_id, record)
+            except Exception as exc:
+                # Progress is incidental; the crawling is the job. A busy state store must
+                # not turn a batch that succeeded into a failure - the rule B08 set for
+                # metrics. The record keeps the latest count, and the end save writes it.
+                logger.warning("Job progress not recorded ({})", type(exc).__name__)
+
         try:
-            result = await self.resources.service.crawl_batch(urls, options, max_concurrency)
+            result = await self.resources.service.crawl_batch(urls, options, max_concurrency, report)
             record.update(status="done", result=result.model_dump(mode="json"))
         except Exception as exc:
             logger.error("Job failed ({})", type(exc).__name__)

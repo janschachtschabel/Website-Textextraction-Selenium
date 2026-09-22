@@ -78,14 +78,24 @@ class CrawlService:
         except Exception as exc:
             logger.warning("Metrics not recorded ({})", type(exc).__name__)
 
-    async def crawl_batch(self, urls, options, max_concurrency) -> BatchCrawlResponse:
+    async def crawl_batch(self, urls, options, max_concurrency, on_progress=None) -> BatchCrawlResponse:
         started = time.monotonic()
         # All deadlines start at batch admission, including time behind max_concurrency.
         expires_at = started + options.timeout_ms / 1000
         semaphore = asyncio.Semaphore(max_concurrency)
-        results = await asyncio.gather(
-            *(self._batch_item(url, options, expires_at, semaphore, started) for url in urls)
-        )
+        tally = {"done": 0, "succeeded": 0}
+
+        async def counted(url):
+            """The caller hears about each finished URL. Counting here rather than inside
+            _batch_item keeps the item's own error handling in one piece."""
+            item = await self._batch_item(url, options, expires_at, semaphore, started)
+            tally["done"] += 1
+            tally["succeeded"] += item.success
+            await on_progress(tally["done"], tally["succeeded"])
+            return item
+
+        each = counted if on_progress else lambda url: self._batch_item(url, options, expires_at, semaphore, started)
+        results = await asyncio.gather(*(each(url) for url in urls))
         succeeded = sum(item.success for item in results)
         return BatchCrawlResponse(
             total=len(results),

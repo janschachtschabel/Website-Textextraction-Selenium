@@ -339,11 +339,14 @@ curl http://127.0.0.1:8000/crawl/batch \
 ```
 
 Batch and single requests share every option and server default. A batch accepts
-1–50 URLs and preserves input order. Each URL consumes the same global-per-worker
+as many URLs as `MAX_URLS_PER_REQUEST` allows - 50 unless the operator raised it - and
+preserves input order. Each URL consumes the same global-per-worker
 admission slot as a single request. `max_concurrency` additionally limits the batch.
 Every URL's deadline starts when the batch is accepted, including time waiting
-behind other batch entries. Large batches may therefore need a larger deadline
-or smaller batches. The maximum is 600 seconds; nginx allows a cleanup margin.
+behind other batch entries. Large batches therefore need a larger deadline, up to
+`MAX_TIMEOUT_SECONDS` (600 by default); nginx allows a cleanup margin. A request above
+either limit is refused with 422 naming it. [docs/settings.md](docs/settings.md) has a
+section on crawling in bulk, and what raising these does not solve.
 
 `timeout_ms` covers admission, rate waits, redirects/retries, browser work,
 conversion and anonymization. Browser and converter workers are separate bounded
@@ -365,6 +368,11 @@ curl http://127.0.0.1:8000/jobs \
   -d '{"urls":["https://example.com","https://www.python.org"],"timeout_ms":300000}'
 curl http://127.0.0.1:8000/jobs/<job_id> -H "Authorization: Bearer $API_KEY"
 ```
+
+While it runs, the poll carries `progress`: `done`, `succeeded` and `total`. It is written
+at most every two seconds, so a long job does not mean one state-store write per URL, and
+the final save always carries the last count. Per-URL *results* arrive with the finished
+batch, not before.
 
 Job records live in the shared state store for `JOB_RESULT_TTL` (one hour) after they
 finish, so any Uvicorn worker answers the poll. The work runs in the process that
