@@ -191,16 +191,18 @@ https://raw.githubusercontent.com/janschachtschabel/Website-Textextraction-Selen
 ```
 
 Add one environment variable in the panel, `API_KEY`, with a value of your own. That is
-all: `docker-compose.yml` pulls a published image, names no build, and leaves `API_KEY` to
-the container's own environment so the panel's value is what arrives.
+all: `docker-compose.yml` pulls a published image, names no build, and passes `API_KEY`
+through to the container with an empty default.
 
-Two things are worth knowing. The panel's variables reach the *container*; compose
-substitution is a separate step that a panel does not fill, which is why this file works
-with no variables set at all and fails in the container log - "Set API_KEY before binding
-HOST to a non-loopback address" - rather than before anything starts. And the image is
-pinned to a version rather than `latest`, so an unattended pull never changes what runs;
-update by editing the tag, or point the panel at a tag of this repository instead of
-`main`.
+Two things are worth knowing. A panel's variables reach compose as *substitution*, usually
+by being written to a `.env` beside the file, and compose does not pass those into
+containers by itself - so a variable has to be named in `environment:` to arrive at all.
+`API_KEY` is, with an empty default rather than the required form, because a required one
+aborts while compose reads the file and asks for a `.env` you cannot write. With the empty
+default the container starts and says it in its own log: "Set API_KEY before binding HOST
+to a non-loopback address". And the image is pinned to a version rather than `latest`, so
+an unattended pull never changes what runs; update by editing the tag, or point the panel
+at a tag of this repository instead of `main`.
 
 The image is `jschachtschabel/website-textextraction` on Docker Hub, built and pushed by
 `.github/workflows/publish.yml` when a `v*` tag is pushed. It is smoke-tested before it is

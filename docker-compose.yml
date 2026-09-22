@@ -2,12 +2,13 @@
 # Portainer, Coolify - fetches only this file, so nothing here may need a build context or
 # a checkout. It pulls a published image instead.
 #
-# Set API_KEY as an environment variable in the panel. It is not listed under
-# environment: on purpose: a panel injects its variables into the container, and naming it
-# here with a default would overwrite whatever the panel set with an empty value. The
-# service binds 0.0.0.0 inside the container and refuses to start without a key, so a
-# missing one fails in the container log with that sentence, rather than aborting compose
-# before anything runs.
+# Set API_KEY as an environment variable in the panel. A panel's variables reach compose
+# as substitution - commonly by writing them to a .env beside this file - and compose does
+# not pass those into containers by itself, so API_KEY has to be named below to arrive at
+# all. The empty default is what makes it deployable: the :? form would abort while compose
+# reads the file, asking for a .env the operator has no way to write. Empty instead lets
+# the container start and say it plainly in its log: "Set API_KEY before binding HOST to a
+# non-loopback address".
 #
 # A clone of this repository builds instead of pulling: docker-compose.override.yml adds
 # the build, and compose merges it automatically. Its .env supplies the key and, from
@@ -16,11 +17,13 @@ services:
   extraction:
     # Pinned, not :latest - an unattended pull should never change the version running.
     # tests/test_packaging.py keeps this level with app/__init__.py.
-    image: jschachtschabel/website-textextraction:2.1.0
+    image: jschachtschabel/website-textextraction:2.1.1
     # Chrome forks helpers that outlive a crash; without an init they accumulate as
     # zombies until the container hits its process limit.
     init: true
     environment:
+      # Empty when nothing names it; the override file replaces this in a checkout.
+      API_KEY: ${API_KEY:-}
       LOG_JSON: "true"
       UVICORN_WORKERS: "2"
     ports:

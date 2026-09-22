@@ -3,6 +3,27 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## 2.1.1 - 2026-09-22
+
+### Fixed - the panel's API_KEY now reaches the container
+
+2.1.0 left `API_KEY` out of `environment:`, reasoning that a panel injects its variables
+into the container and that naming it with a default would overwrite them. That reasoning
+was wrong. A panel's variables reach compose as substitution - commonly by being written
+to a `.env` beside the compose file - and compose does not pass those into containers by
+itself. Measured against 2.1.0's file with `API_KEY` in a `.env`: the container's
+environment held `LOG_JSON` and `UVICORN_WORKERS` and no key, so the service would have
+refused to start however the panel was configured.
+
+- `API_KEY: ${API_KEY:-}` passes it through. The empty default, rather than the required
+  `:?` form, is what keeps the file deployable: a required variable aborts while compose
+  reads the file and asks for a `.env` the operator cannot write. Verified for all three
+  ways a panel can supply it - a `.env` beside the file, nothing at all, and an override
+  file - and a checkout still fails early and by name through
+  `docker-compose.override.yml`.
+
+The image is unchanged; 2.1.1 republishes it so the pinned tag and `__version__` agree.
+
 ## 2.1.0 - 2026-09-21
 
 ### Added - a published image, and a compose file a panel can actually deploy
