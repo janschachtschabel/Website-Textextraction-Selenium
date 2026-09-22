@@ -20,15 +20,62 @@ services:
   extraction:
     # Pinned, not :latest - an unattended pull should never change the version running.
     # tests/test_packaging.py keeps this level with app/__init__.py.
-    image: jschachtschabel/website-textextraction:2.2.1
+    image: jschachtschabel/website-textextraction:2.3.0
     # Chrome forks helpers that outlive a crash; without an init they accumulate as
     # zombies until the container hits its process limit.
     init: true
     environment:
-      # No value: taken from the panel or the environment, left unset when neither has it.
+      # Every setting the service reads, passed through without a value: compose takes
+      # each from the panel or the environment and leaves out the ones nobody names, so
+      # the image's own defaults apply. docs/settings.md says what each one does.
+      #
+      # HOST and PORT are deliberately absent. They come from the image, and HOST=127.0.0.1
+      # would make the service listen on the container's own loopback, where the published
+      # port reaches nothing.
+      - ALLOW_INSECURE_SSL
       - API_KEY
-      - LOG_JSON=true
-      - UVICORN_WORKERS=2
+      - CHROMEDRIVER_PATH
+      - CHROME_BINARY
+      - CONVERSION_WORKERS
+      - DEFAULT_ACCEPT_LANGUAGE
+      - DEFAULT_DOMAIN_RATE_LIMIT_RPS
+      - DEFAULT_HEADLESS
+      - DEFAULT_JS_AUTO_WAIT
+      - DEFAULT_JS_STRATEGY
+      - DEFAULT_MAX_BYTES
+      - DEFAULT_MODE
+      - DEFAULT_RETRIES
+      - DEFAULT_TIMEOUT_SECONDS
+      - DEFAULT_USER_AGENT
+      - GLOBAL_RATE_LIMIT_RPS
+      - HTML_CONVERTER
+      - HTTP_MAX_CONNECTIONS
+      - INBOUND_RATE_LIMIT_BURST
+      - INBOUND_RATE_LIMIT_RPS
+      - JOB_RESULT_TTL
+      - LOG_JSON=${LOG_JSON:-true}
+      - LOG_LEVEL
+      - MAX_ACTIVE_JOBS
+      - MAX_CONCURRENT_REQUESTS
+      - MAX_QUEUE_SIZE
+      - MAX_REQUEST_BYTES
+      - MAX_TIMEOUT_SECONDS
+      - MAX_URLS_PER_REQUEST
+      - MEDIA_CONVERSION_POLICY
+      - PRESIDIO_DE_MODEL
+      - PRESIDIO_EN_MODEL
+      - QUEUE_TIMEOUT_SECONDS
+      - RESPECT_ROBOTS_TXT
+      - RESULT_CACHE_DIR
+      - RESULT_CACHE_MAX_SIZE
+      - RESULT_CACHE_TTL
+      - REVALIDATION_TTL
+      - SELENIUM_MAX_POOL_SIZE
+      - SELENIUM_NO_SANDBOX
+      - SSRF_PROTECTION
+      - TRAFILATURA_CLEAN_MARKDOWN
+      - UVICORN_WORKERS=${UVICORN_WORKERS:-2}
+      - WORKER_MAX_JOBS
     ports:
       # Reachable by default, because the deployment that cannot configure anything is the
       # one that needs it. What is published is key-protected: the service always binds

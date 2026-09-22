@@ -50,12 +50,15 @@ request, not a template to fill in.
 `mode=auto` starts one only when the plain HTML yields too little text. A screenshot needs
 the browser.
 
-**Several URLs.** `POST /crawl/batch` takes up to 50 and answers once all of them are done.
-`POST /jobs` takes the same body, answers at once with a job id, and is polled at
-`GET /jobs/{job_id}` - use it when a batch outlives the client's patience.
+**Several URLs.** `POST /crawl/batch` takes as many as the operator allows - 50 unless
+`MAX_URLS_PER_REQUEST` was raised - and answers once all of them are done. `POST /jobs`
+takes the same body, answers at once with a job id, and is polled at `GET /jobs/{job_id}`,
+which reports how many URLs are finished while it runs. Use it when a batch outlives the
+client's patience.
 
 **Authentication.** When the operator configures an API key, every endpoint except `/` and
-`/health` requires `Authorization: Bearer <key>`, and this page is not published at all.
+`/health` requires `Authorization: Bearer <key>`. This page needs it too: a browser is
+asked for it as an HTTP Basic password, with any username.
 """
 
 
@@ -152,6 +155,8 @@ def _admission(config):
 
     def admit(urls: int):
         # Runs after authentication, so unauthenticated traffic cannot drain the bucket.
+        if urls > config.max_urls_per_request:
+            raise HTTPException(422, f"At most {config.max_urls_per_request} URLs per request")
         wait = limit.take(urls) if limit else 0
         if wait:
             raise HTTPException(429, "Too many crawl requests", headers={"Retry-After": str(math.ceil(wait))})
@@ -308,7 +313,10 @@ def _job_routes(application, config, admit, check_auth):
         record = await application.state.resources.jobs.status(job_id)
         if record is None:
             raise HTTPException(404, "Unknown or expired job")
-        return JobStatus(job_id=job_id, **{name: record[name] for name in JobStatus.model_fields if name != "job_id"})
+        # .get, not [name]: a record written by an earlier release predates a field added
+        # since, and the store outlives an upgrade.
+        fields = {name: record.get(name) for name in JobStatus.model_fields if name != "job_id"}
+        return JobStatus(job_id=job_id, **fields)
 
 
 def create_app(config=settings, resources=None):

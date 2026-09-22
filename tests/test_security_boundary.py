@@ -5,10 +5,14 @@ from dataclasses import replace
 
 import httpx
 import pytest
+from fastapi import HTTPException
 
 from app import config as config_module
+from app import main
 from app.config import settings
 from app.main import create_app
+from app.results import CrawlError
+from app.schemas import CrawlRequest, resolve_options
 
 LOCAL = replace(settings, host="127.0.0.1", api_key=None)
 
@@ -247,3 +251,39 @@ def test_a_user_agent_that_no_request_could_use_fails_at_startup(agent):
     """resolve_options applies it per request; an invalid value would be a 500 on every crawl."""
     with pytest.raises(ValueError, match="DEFAULT_USER_AGENT"):
         replace(LOCAL, default_user_agent=agent)
+
+
+async def test_more_urls_than_the_operator_allows_are_refused():
+    """The count is an operator setting, not a constant: a deployment that crawls in bulk
+    raises it, and the default stays where every earlier release had it."""
+    urls = [f"https://example.com/{n}" for n in range(51)]
+    response = await _request(create_app(LOCAL), "POST", "/crawl/batch", json={"urls": urls})
+    assert response.status_code == 422
+    assert "50" in response.json()["detail"]
+
+
+def test_the_operator_can_admit_more_urls():
+    admit = main._admission(replace(LOCAL, max_urls_per_request=2000))
+    admit(2000)  # the point of the setting: this must not raise
+    with pytest.raises(HTTPException) as refused:
+        admit(2001)
+    assert "2000" in refused.value.detail
+
+
+@pytest.mark.parametrize("requested, allowed", [(600_001, False), (600_000, True)])
+def test_a_deadline_above_the_operator_ceiling_is_refused(requested, allowed):
+    """600 s is the default ceiling; a bulk deployment raises MAX_TIMEOUT_SECONDS."""
+    request = CrawlRequest(url="https://example.com", timeout_ms=requested)
+    if allowed:
+        assert resolve_options(request, LOCAL).timeout_ms == requested
+        return
+    with pytest.raises(CrawlError) as refused:
+        resolve_options(request, LOCAL)
+    assert "600" in str(refused.value)
+
+
+def test_the_operator_can_raise_the_deadline_ceiling():
+    config = replace(LOCAL, max_timeout_seconds=7200)
+    assert (
+        resolve_options(CrawlRequest(url="https://example.com", timeout_ms=7_200_000), config).timeout_ms == 7_200_000
+    )

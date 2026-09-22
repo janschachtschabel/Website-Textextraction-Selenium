@@ -32,6 +32,13 @@ def _bool(name: str, default: bool) -> bool:
     return value.lower() in {"1", "true", "yes", "on"}
 
 
+# Structural ceilings of the request model, which MAX_URLS_PER_REQUEST and
+# MAX_TIMEOUT_SECONDS must stay within. 10000 URLs is about 600 KB of request body, inside
+# the 1 MiB MAX_REQUEST_BYTES default. Checked at startup, so an operator setting the model
+# would reject fails loudly here rather than as a puzzling 422 on the first request.
+URL_CEILING = 10_000
+TIMEOUT_CEILING_SECONDS = 86_400
+
 # Settings whose value is a count: anything below one disables the thing it sizes.
 _POSITIVE = (
     "selenium_max_pool_size",
@@ -44,6 +51,8 @@ _POSITIVE = (
     "queue_timeout_seconds",
     "uvicorn_workers",
     "result_cache_max_size",
+    "max_urls_per_request",
+    "max_timeout_seconds",
 )
 _CHOICES = {
     "default_mode": {"auto", "fast", "js"},
@@ -104,6 +113,11 @@ class Settings:
     max_request_bytes: int = int(os.getenv("MAX_REQUEST_BYTES", str(1024 * 1024)))
     inbound_rate_limit_rps: float = float(os.getenv("INBOUND_RATE_LIMIT_RPS", "0"))
     inbound_rate_limit_burst: int = int(os.getenv("INBOUND_RATE_LIMIT_BURST", "20"))
+    # Both were constants until 2.3.0. A deployment that crawls in bulk raises them; the
+    # defaults are what every earlier release enforced. The schema keeps a structural
+    # ceiling above these, so an operator cannot set one the request model would reject.
+    max_urls_per_request: int = int(os.getenv("MAX_URLS_PER_REQUEST", "50"))
+    max_timeout_seconds: int = int(os.getenv("MAX_TIMEOUT_SECONDS", "600"))
 
     def __post_init__(self):
         self._check_counts()
@@ -122,8 +136,12 @@ class Settings:
                 raise ValueError(f"Invalid {name}")
 
     def _check_limits(self):
-        if not 1 <= self.default_timeout_seconds <= 600:
-            raise ValueError("DEFAULT_TIMEOUT_SECONDS must be 1..600")
+        if self.max_urls_per_request > URL_CEILING or self.max_timeout_seconds > TIMEOUT_CEILING_SECONDS:
+            raise ValueError(
+                f"MAX_URLS_PER_REQUEST caps at {URL_CEILING}, MAX_TIMEOUT_SECONDS at {TIMEOUT_CEILING_SECONDS}"
+            )
+        if not 1 <= self.default_timeout_seconds <= self.max_timeout_seconds:
+            raise ValueError("DEFAULT_TIMEOUT_SECONDS must be 1..MAX_TIMEOUT_SECONDS")
         if not 0 <= self.default_retries <= 10 or not 1024 <= self.default_max_bytes <= 100 * 1024 * 1024:
             raise ValueError("Invalid default retry or byte limit")
         if (

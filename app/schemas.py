@@ -11,8 +11,8 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
-from .config import Settings, settings
-from .results import ExtractionStatus
+from .config import TIMEOUT_CEILING_SECONDS, URL_CEILING, Settings, settings
+from .results import CrawlError, ExtractionStatus
 
 # The body /docs offers for "Try it out". Minimal on purpose: every option left out
 # falls back to the operator's default, so this is the shortest request that works.
@@ -137,6 +137,7 @@ JOB_STATUS_EXAMPLE = {
     "status": "done",
     "submitted_at": "2026-09-21T07:17:14+00:00",
     "finished_at": "2026-09-21T07:17:16+00:00",
+    "progress": {"done": 2, "succeeded": 1, "total": 2},
     "result": BATCH_ANSWER_EXAMPLE,
     "error": None,
 }
@@ -154,7 +155,12 @@ class CrawlOptions(BaseModel):
         description="accuracy waits for the page to settle; speed shortens that wait and blocks "
         "images, fonts and media, unless a screenshot is requested",
     )
-    timeout_ms: int | None = Field(None, ge=1000, le=600_000, description="End-to-end deadline including queue time")
+    timeout_ms: int | None = Field(
+        None,
+        ge=1000,
+        le=TIMEOUT_CEILING_SECONDS * 1000,
+        description="End-to-end deadline including queue time, up to the operator's MAX_TIMEOUT_SECONDS",
+    )
     retries: int | None = Field(None, ge=0, le=10, description="Repeats of a failed fetch, all within the deadline")
     max_bytes: int | None = Field(
         None,
@@ -267,7 +273,11 @@ class CrawlRequest(CrawlOptions):
 
 class BatchCrawlRequest(CrawlOptions):
     model_config = ConfigDict(json_schema_extra={"examples": [BATCH_EXAMPLE]})
-    urls: list[HttpUrl] = Field(min_length=1, max_length=50, description="Addresses to crawl, 1 to 50 per request")
+    urls: list[HttpUrl] = Field(
+        min_length=1,
+        max_length=URL_CEILING,
+        description="Addresses to crawl, up to the operator's MAX_URLS_PER_REQUEST (50 unless raised)",
+    )
     max_concurrency: int = Field(
         3, ge=1, le=10, description="URLs fetched at once, within the service's global capacity"
     )
@@ -293,6 +303,10 @@ def resolve_options(request: CrawlOptions, config: Settings = settings) -> Crawl
         "respect_robots_txt": config.respect_robots_txt,
     }
     values.update({name: value for name, value in defaults.items() if values[name] is None})
+    # Refused rather than clamped: a bulk job silently cut to a shorter deadline fails on
+    # its tail with nothing saying why, while this names the number to ask the operator for.
+    if values["timeout_ms"] > config.max_timeout_seconds * 1000:
+        raise CrawlError(f"timeout_ms above the {config.max_timeout_seconds} second limit of this service", 422)
     # A politeness limit the operator sets is a ceiling: a client may crawl a domain more
     # slowly, but not faster, and cannot switch the limit off with 0.
     ceiling = config.default_domain_rate_limit_rps
@@ -385,11 +399,21 @@ class JobAccepted(BaseModel):
     status_url: str = Field(description="Path to poll for the result")
 
 
+class JobProgress(BaseModel):
+    """How far a running job has got. Counts, not per-URL results: those arrive with the
+    finished batch. Written at most every two seconds, so it can lag slightly behind."""
+
+    done: int = Field(description="URLs finished, whether they succeeded or not")
+    succeeded: int = Field(description="Of those, how many produced a result")
+    total: int = Field(description="URLs the job was given")
+
+
 class JobStatus(BaseModel):
     model_config = ConfigDict(json_schema_extra={"examples": [JOB_STATUS_EXAMPLE]})
     job_id: str = Field(description="Identifier of the job")
     status: Literal["queued", "running", "done", "failed"] = Field(description="Where the job stands")
     submitted_at: str = Field(description="When the job was accepted, ISO 8601")
     finished_at: str | None = Field(None, description="When it finished, absent while it still runs")
+    progress: JobProgress | None = Field(None, description="How many URLs are done, while the job runs and after")
     result: BatchCrawlResponse | None = Field(None, description="The batch result, present once the job is done")
     error: str | None = Field(None, description="Why the job failed, absent otherwise")
