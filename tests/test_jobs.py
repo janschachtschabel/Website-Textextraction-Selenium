@@ -59,6 +59,20 @@ async def finished(client, status_url, seconds=20):
     pytest.fail("The job did not finish")
 
 
+def saves(monkeypatch, jobs):
+    """Every record the runner writes, as (status, progress). A poll cannot see writes the
+    throttle swallowed, so anything about how often it writes is asserted from here."""
+    original = jobs._save
+    written = []
+
+    async def spy(job_id, record):
+        written.append((record["status"], dict(record["progress"])))
+        await original(job_id, record)
+
+    monkeypatch.setattr(jobs, "_save", spy)
+    return written
+
+
 async def test_a_job_runs_in_the_background_and_reports_the_batch_result(jobs_api):
     async with jobs_api() as (client, _):
         urls = ["https://example.com/a", "https://example.com/blocked"]
@@ -128,14 +142,7 @@ async def test_a_running_job_writes_its_progress_before_it_finishes(jobs_api, mo
     """
     monkeypatch.setattr("app.jobs.PROGRESS_EVERY_SECONDS", 0.0)
     async with jobs_api() as (client, resources):
-        original = resources.jobs._save
-        written = []
-
-        async def spy(job_id, record):
-            written.append((record["status"], dict(record["progress"])))
-            await original(job_id, record)
-
-        monkeypatch.setattr(resources.jobs, "_save", spy)
+        written = saves(monkeypatch, resources.jobs)
         urls = [f"https://example.com/{n}" for n in range(6)]
         accepted = (await client.post("/jobs", json={"urls": urls, "max_concurrency": 2})).json()
         await finished(client, accepted["status_url"])
@@ -146,6 +153,23 @@ async def test_a_running_job_writes_its_progress_before_it_finishes(jobs_api, mo
     )
     assert mid_run == sorted(mid_run), f"progress must not go backwards, saw {mid_run}"
     assert written[-1][1]["done"] == 6, f"the last write must count every URL, saw {written[-1]}"
+
+
+async def test_the_throttle_keeps_a_large_job_from_writing_once_per_url(jobs_api, monkeypatch):
+    """The counterpart to the test above: that one proves progress is written at all, this
+    one proves the throttle decides how often. Without it a 2000-URL batch in fast mode is
+    2000 writes to a store shared across processes, through the same thread pool the
+    crawling uses. A swallowed write must still not cost the final count."""
+    monkeypatch.setattr("app.jobs.PROGRESS_EVERY_SECONDS", 3600.0)
+    async with jobs_api() as (client, resources):
+        written = saves(monkeypatch, resources.jobs)
+        urls = [f"https://example.com/{n}" for n in range(8)]
+        accepted = (await client.post("/jobs", json={"urls": urls, "max_concurrency": 2})).json()
+        body = await finished(client, accepted["status_url"])
+
+    running = [progress for status, progress in written if status == "running"]
+    assert len(running) == 1, f"the throttle let {len(running)} writes through, close to one per URL: {written}"
+    assert body["progress"] == {"done": 8, "succeeded": 8, "total": 8}, "a throttled write must not lose the count"
 
 
 async def test_progress_counts_successes_apart_from_failures(jobs_api):
