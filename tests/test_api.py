@@ -340,3 +340,20 @@ async def test_a_forced_refresh_never_joins_another_request(api):
     assert forced.json()["coalesced"] is False and forced.json()["cached"] is False
     assert state["calls"] == 2
     assert not resources.service.inflight  # neither request left the other's entry behind
+
+
+@pytest.mark.parametrize(
+    "path, body",
+    [
+        ("/crawl", {"url": "https://example.com/article"}),
+        ("/crawl/batch", {"urls": ["https://example.com/article"]}),
+        ("/jobs", {"urls": ["https://example.com/article"]}),
+    ],
+)
+async def test_a_deadline_above_the_operator_ceiling_is_refused_on_every_route(api, path, body):
+    """resolve_options raises CrawlError; this pins that the handler turns it into a 422 the
+    client can read, on all three routes that resolve options."""
+    client, _, _ = api
+    response = await client.post(path, json={**body, "timeout_ms": 700_000})
+    assert response.status_code == 422
+    assert "600" in response.json()["detail"]

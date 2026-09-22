@@ -117,23 +117,35 @@ async def test_a_job_past_its_deadline_without_a_result_is_reported_lost(jobs_ap
         assert body["status"] == "failed" and body["error"] == "Job lost: the process that ran it stopped"
 
 
-async def test_a_running_job_says_how_far_along_it_is(jobs_api):
+async def test_a_running_job_writes_its_progress_before_it_finishes(jobs_api, monkeypatch):
     """Without this a 2000-URL job answers "running" for an hour and then everything at
-    once, which is indistinguishable from a job that is stuck."""
-    async with jobs_api(delay=0.25) as (client, _):
+    once, which is indistinguishable from a job that is stuck.
+
+    Asserted on what was written, not on what a poll happened to catch: racing polls
+    against a job makes the test timing-dependent, and an earlier version of it passed
+    even with the throttle disabled entirely, because the save at the end supplied the
+    only progress it ever saw.
+    """
+    monkeypatch.setattr("app.jobs.PROGRESS_EVERY_SECONDS", 0.0)
+    async with jobs_api() as (client, resources):
+        original = resources.jobs._save
+        written = []
+
+        async def spy(job_id, record):
+            written.append((record["status"], dict(record["progress"])))
+            await original(job_id, record)
+
+        monkeypatch.setattr(resources.jobs, "_save", spy)
         urls = [f"https://example.com/{n}" for n in range(6)]
         accepted = (await client.post("/jobs", json={"urls": urls, "max_concurrency": 2})).json()
-        seen = []
-        for _ in range(40):
-            body = (await client.get(accepted["status_url"])).json()
-            if body["progress"]:
-                seen.append(body["progress"]["done"])
-            if body["status"] in {"done", "failed"}:
-                break
-            await asyncio.sleep(0.1)
-        assert seen, "the job never reported any progress"
-        assert seen[-1] == 6, f"the finished job must count every URL, saw {seen}"
-        assert seen == sorted(seen), f"progress must not go backwards, saw {seen}"
+        await finished(client, accepted["status_url"])
+
+    mid_run = [progress["done"] for status, progress in written if status == "running"]
+    assert [done for done in mid_run if 0 < done < 6], (
+        f"nothing was written while the job ran, so a poll could only ever see 0 or 6: {written}"
+    )
+    assert mid_run == sorted(mid_run), f"progress must not go backwards, saw {mid_run}"
+    assert written[-1][1]["done"] == 6, f"the last write must count every URL, saw {written[-1]}"
 
 
 async def test_progress_counts_successes_apart_from_failures(jobs_api):
