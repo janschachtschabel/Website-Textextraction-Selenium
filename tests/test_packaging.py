@@ -1,7 +1,8 @@
 """Guards that the repository's own files agree with each other.
 
 The supported Python versions must be the tested ones (A23), the image must install the
-lockfile it ships, and .env.example must name every setting the service reads.
+lockfile it ships, and every setting the service reads must appear in both files the
+operator consults about settings: .env.example lists them, docs/settings.md explains them.
 """
 
 import re
@@ -66,14 +67,35 @@ def test_the_image_installs_from_the_lockfile_and_checks_the_hashes():
     assert "--require-hashes" in dockerfile, "a lockfile whose hashes are not checked proves nothing"
 
 
-def test_the_example_env_names_every_setting_the_service_reads():
-    """.env.example is the operator's reference for what a deployment can be told."""
+def settings_the_service_reads():
+    """Every environment variable app/ and run.py actually read. Two files answer for these
+    to the operator - one lists them, one explains them - and both are guarded below."""
     readers = re.compile(r"(?:os\.getenv|os\.environ\.get|_bool)\(\s*[\"']([A-Z0-9_]+)[\"']")
     sources = [*sorted((ROOT / "app").rglob("*.py")), ROOT / "run.py"]
     read = {name for source in sources for name in readers.findall(source.read_text("utf-8"))}
-    read -= {"XDG_CACHE_HOME"}  # freedesktop's own variable; RESULT_CACHE_DIR is the setting for it
+    return read - {"XDG_CACHE_HOME"}  # freedesktop's own variable; RESULT_CACHE_DIR is the setting for it
+
+
+def test_the_example_env_names_every_setting_the_service_reads():
+    """.env.example is the operator's reference for what a deployment can be told."""
     named = set(re.findall(r"^#?\s*([A-Z0-9_]+)=", (ROOT / ".env.example").read_text("utf-8"), re.M))
+    read = settings_the_service_reads()
     assert read <= named, f".env.example never names: {sorted(read - named)}"
+
+
+def test_the_settings_reference_explains_every_setting_the_service_reads():
+    """.env.example is a plain NAME=VALUE list on purpose, so that a panel's environment
+    editor can take it whole; the explanations live in docs/settings.md instead. That file
+    had nothing watching it. 2.3.1 was exactly this drift one file over - a limit the code
+    had made configurable while the text about it still named the old constant.
+
+    A table row, not a mention: the row is what carries the default and the description an
+    operator looks the setting up for."""
+    documented = (ROOT / "docs/settings.md").read_text("utf-8")
+    missing = sorted(
+        name for name in settings_the_service_reads() if not re.search(rf"^\| `{name}` \|", documented, re.M)
+    )
+    assert not missing, f"docs/settings.md has no table row for: {missing}"
 
 
 def without_comments(name):
