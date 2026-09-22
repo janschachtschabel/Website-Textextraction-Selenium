@@ -20,7 +20,7 @@ Requests may override some of these per crawl; see "Options and privacy" in the
 [README](../README.md). An omitted or null option inherits the value here, while an explicit
 `false` or `0` in a request is an override.
 
-## In a container, three rules differ
+## In a container, four rules differ
 
 **Do not set `HOST` or `PORT`.** The image sets them to `0.0.0.0` and `8000`, and the
 container's own network namespace is what makes that safe. `HOST=127.0.0.1` inside a
@@ -34,6 +34,13 @@ one, so every container needs it. An empty value counts as missing.
 **`BIND_ADDRESS` and `HOST_PORT` are read by docker compose, not by the service.** They
 decide where the container's port 8000 is published on the host. Setting them in a panel's
 environment editor does nothing useful; they belong in a `.env` beside the compose file.
+
+**Leave `RESULT_CACHE_DIR` alone.** The image creates
+`/var/cache/website-text-extraction` owned by the service user with mode 0700, and the
+compose file mounts a named volume there. Pointing the setting somewhere else aims past that
+volume, and the service refuses to start on a cache directory that is not private to its
+user - so the cache is lost on every restart at best, and the container does not come up at
+worst.
 
 ## Crawling in bulk
 
@@ -50,6 +57,14 @@ DEFAULT_MAX_BYTES=2097152
 `URLs × seconds each ÷ max_concurrency`. With four browser workers and about nine seconds a
 page, 2000 URLs need roughly 75 minutes; `mode=fast` needs about two. `DEFAULT_MAX_BYTES`
 is in that list because 2000 results at the 10 MiB default is a 20 GB worst case.
+
+**If `INBOUND_RATE_LIMIT_RPS` is on, raise `INBOUND_RATE_LIMIT_BURST` with them or turn it
+off.** Every URL costs one token, also inside a batch, and a request larger than the burst
+is admitted once and then pays off its excess. Measured at the default burst of 20 with a
+rate of 2: one 2000-URL request leaves the bucket at -1980, and the next request of any size
+waits 990 seconds. That is the limiter working as designed - one bulk request is worth a
+thousand seconds of its budget - but at these sizes it reads as an outage. It is off by
+default (`INBOUND_RATE_LIMIT_RPS=0`), so this only applies if you turned it on.
 
 One big job is gentler on the service than many small ones. A job's own `max_concurrency`
 (at most 10) is applied *before* the service-wide capacity, so a 2000-URL job only ever
