@@ -219,7 +219,8 @@ def _observability_routes(application, check_auth):
     async def stats():
         """Requests, errors, cache hits, coalesced answers and latency percentiles over a rolling
         60 minutes, with the throughput per minute, the entries in the result cache and the
-        capacity in use."""
+        capacity in use. The counters cover every worker process of the deployment; the
+        capacity is that of the process that answers."""
         active = application.state.resources
         count = await active.io(len, active.cache)
         result = await active.metrics.stats(count)
@@ -270,11 +271,23 @@ def _crawl_routes(application, config, admit, check_auth):
     async def crawl(
         request: CrawlRequest = Body(openapi_examples=_choices(CRAWL_EXAMPLE, CRAWL_FULL_EXAMPLE, "just the URL")),
     ):
-        """Fetch one URL and return it as Markdown.
+        """Fetch one URL and return its text as Markdown.
 
-        Only `url` is required; every other option falls back to the operator's default. The
-        answer names the engine that ran and the converter that produced the text, and lists
-        in `warnings` everything that degraded the result without failing it."""
+        Only `url` is required; an option left out takes the operator's default, which its
+        description names. The crawl runs in this order:
+
+        1. The network policy checks where the URL resolves, and again for every redirect and
+           for the address Chrome finally shows.
+        2. The page is fetched over HTTP or rendered in Chrome. `mode` decides, and
+           `fetch_engine` in the answer says which ran.
+        3. The HTML or document is converted to Markdown; `converter` names what produced it.
+        4. What was asked for besides the text is added: links, metadata, the screenshot
+           Chrome took. With `anonymize`, personal data is replaced and those are left out.
+
+        A successful answer is cached for `RESULT_CACHE_TTL` seconds, and identical requests
+        running at once share one fetch; `cached` and `coalesced` say when that happened.
+        `success` says whether the answer is usable content, and `warnings` lists everything
+        that degraded it without failing it."""
         admit(1)
         return await application.state.resources.service.crawl(str(request.url), resolve_options(request, config))
 
@@ -355,8 +368,12 @@ def _job_routes(application, config, admit, check_auth):
     async def job_status(job_id: JobId):
         """Report how far a job has got, and where its results are.
 
-        The results themselves are read from `results_url`, while the job runs and after.
-        Answers 404 when the id is unknown or its record has expired."""
+        A job is `queued`, then `running`, then `done` once every URL has been tried - also
+        when some of them failed; `progress` counts both. It is `failed` when the service
+        shut down while it ran, when a result could not be stored, or when its process
+        stopped: an unfinished job 30 seconds past its deadline is reported lost. `error`
+        says which. The results themselves are read from `results_url`, while the job runs
+        and after; both stay readable for `JOB_RESULT_TTL` seconds after the job ends."""
         record = await application.state.resources.jobs.status(job_id)
         if record is None:
             raise HTTPException(404, "Unknown or expired job")
