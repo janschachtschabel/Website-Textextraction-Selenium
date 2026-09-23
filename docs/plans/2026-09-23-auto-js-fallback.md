@@ -128,6 +128,40 @@ requests before the release, test more of the large OER sources, then release 3.
   WLO's list, taken from the WLO index, through fast, auto and js; failures sorted by
   cause, fixes only where a cause is shown, then the same run again.
 
+## Results of the source run
+
+Two material pages each from 46 of WLO's largest sources, taken from the WLO index, plus the
+user's three pages and two controls - 94 pages, default settings, the published image with
+the branch's code mounted. "Usable" means a success with at least 60 words.
+
+- **auto**: 63 usable answers instead of 53 on 3.1.0. Rescued: OERSI (twillo, doi.org), memucho,
+  the WLO and Schulcampus RLP edu-sharing render pages, PhET's lists, Siemens Stiftung, Walter
+  Fendt's apps, YouTube. One page lost words: kindOERgarten, 57 instead of 70.
+- **What the run found and fixed**, each test first: Fobizz failed on every page with 502,
+  because the egress guard named port 80 in Host and the site redirected to
+  https://app.fobizz.com:80/; Siemens Stiftung failed with 502 on "Content-Encoding: (with ";
+  YouTube, the second largest source, gave its footer over HTTP and Google's consent page in
+  Chrome - its title, channel and description now come from the data the watch page embeds,
+  and auto keeps a page that carries its content as data on HTTP.
+- **The 31 answers that stay weak**, by cause: 11 pages with little text of their own (podcast
+  and video pages, apps and simulations, a KMap exercise built in shadow roots); 10 refused
+  the service's crawler user agent (RPI-Virtuell's NinjaFirewall, DiLerTube's 423, OER
+  Commons' 403, one Globales Lernen page, LEIFI's Cloudflare) - OER Commons and DiLerTube
+  served a browser user agent; 7 dead links in WLO's index (404, a deleted domain, a Fobizz
+  material redirected to its gallery); 2 Digital Learning Lab pages did not answer on port
+  443 from the test network; 1 video file, skipped by the media policy.
+- **Time**: fast median 1.0 s; auto median 0.9 s where HTTP sufficed (63 pages) and 9.3 s where
+  it rendered (28 pages, 90 % within 15.2 s).
+
+- **speed and accuracy** on the 49 pages where JavaScript mattered, plus five plain ones: the
+  same text on 46; the other three were a 404 page and two kindOERgarten pages on which `speed`
+  failed. Median 5.2 s for `speed`, 6.0 s for `accuracy`; `accuracy` took 1.17 times as long
+  where both succeeded.
+- **The kindOERgarten failure**: `speed` blocked image requests by URL, the page's blocked
+  requests failed, and its tab crashed a few seconds after load - 3.1.0 read the page before
+  that, and crashed the same way once told to wait five seconds. `speed` now switches images
+  off in Chrome instead; both pages answer with `speed`, PhET and diagrams.net unchanged.
+
 ## Out of scope
 
 - Disguising the browser as a person (hiding `navigator.webdriver`, faking plugins), which

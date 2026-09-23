@@ -41,6 +41,11 @@ content the HTTP path reads from such data on HTTP - a YouTube video, a KMap les
   with 502. Codings the service cannot decode - br, zstd, compress - are still refused; x-gzip is
   gzip.
 
+- `speed` switches images off in Chrome instead of blocking their requests by URL. A blocked
+  image request fails in the page, and kindoergarten.wordpress.com crashed its tab a few seconds
+  later - 3.1.0 read the page before that, but waiting for running requests made both
+  kindOERgarten materials fail with 502 under `speed`. Fonts and media stay blocked.
+
 ### Changed - auto renders with accuracy
 
 auto renders with `js_strategy=accuracy` unless the request names a strategy;

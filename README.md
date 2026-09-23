@@ -443,8 +443,8 @@ it can be pasted into an editor that only understands that form.
 - `max_bytes`: bounds decoded HTTP output and rendered HTML; truncation is explicit.
   Compressed HTTP input is decoded with a bounded output allocation. For Chrome,
   this bounds returned HTML, **not total bytes of all browser assets**.
-- `js_strategy=speed`: eager navigation; blocks common image/font/media URLs unless
-  a screenshot is requested. `accuracy` waits for normal page load. `auto` renders
+- `js_strategy=speed`: eager navigation; switches images off and blocks common
+  font/media URLs unless a screenshot is requested. `accuracy` waits for normal page load. `auto` renders
   with `accuracy` unless the request names a strategy: it renders only pages whose
   content arrives after the page itself, which `speed` reads too early.
 - `wait_for_selectors`: wait until all CSS selectors match visible elements.

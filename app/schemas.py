@@ -169,8 +169,8 @@ class CrawlOptions(BaseModel):
     js_strategy: Literal["accuracy", "speed"] | None = Field(
         None,
         description="How Chrome loads the page. accuracy waits for the full page load; speed reads it once "
-        "the document is parsed and blocks image, font and media files by extension unless a screenshot "
-        "is taken. With js_auto_wait, speed wants 0.3 s of still text instead of 1 s and gives up after "
+        "the document is parsed, switches images off and blocks font and media files by extension unless "
+        "a screenshot is taken. With js_auto_wait, speed wants 0.3 s of still text instead of 1 s and gives up after "
         "10 s instead of 20 s. Default: DEFAULT_JS_STRATEGY, speed - except that auto renders with "
         "accuracy, since it renders only pages whose content arrives after the page itself",
     )
