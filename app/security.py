@@ -23,6 +23,8 @@ def public_address(value: str) -> bool:
             address = address.ipv4_mapped
         elif address.sixtofour or address.teredo:
             return False  # Transition tunnels can encode a second, private destination.
+        elif address.is_site_local:
+            return False  # Deprecated site-local fec0::/10, which ipaddress still reports as global.
     return address.is_global and not (address.is_multicast or address.is_reserved or address.is_unspecified)
 
 

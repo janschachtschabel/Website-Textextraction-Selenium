@@ -21,7 +21,7 @@ def options(**values):
 
 
 @pytest.mark.parametrize(
-    "address", ["127.0.0.1", "10.1.2.3", "169.254.169.254", "::ffff:127.0.0.1", "fe80::1", "100.64.0.1"]
+    "address", ["127.0.0.1", "10.1.2.3", "169.254.169.254", "::ffff:127.0.0.1", "fe80::1", "fec0::1", "100.64.0.1"]
 )
 def test_private_resolved_targets_are_blocked(address, monkeypatch):
     monkeypatch.setattr(
@@ -31,7 +31,7 @@ def test_private_resolved_targets_are_blocked(address, monkeypatch):
             (socket.AF_INET6 if ":" in address else socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, 443))
         ],
     )
-    with pytest.raises(CrawlError):
+    with pytest.raises(CrawlError, match="blocked by network policy"):
         resolve_target("https://rebind.example")
 
 
