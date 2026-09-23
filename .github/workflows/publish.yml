@@ -60,6 +60,15 @@ jobs:
             -H 'authorization: Bearer probe-key' -H 'content-type: application/json' \
             -d '{"url": "https://example.com", "mode": "js"}' \
             | grep -q '"success": *true' || { docker logs probe; exit 1; }
+          # The image anonymizes out of the box: without the PII extra or a model this is a 503.
+          for language in de en; do
+            curl -fsS -X POST localhost:8000/crawl \
+              -H 'authorization: Bearer probe-key' -H 'content-type: application/json' \
+              -d "{\"url\": \"https://example.com\", \"mode\": \"fast\", \"anonymize\": true, \"anonymize_language\": \"$language\"}" \
+              | grep -q '"anonymization": *{' || { docker logs probe; exit 1; }
+          done
+          # Media metadata needs ffprobe, run as the service user the way the converter runs it.
+          docker exec probe ffprobe -version > /dev/null || { docker logs probe; exit 1; }
           docker rm -f probe
 
       - uses: docker/login-action@v3
