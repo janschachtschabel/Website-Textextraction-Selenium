@@ -20,6 +20,15 @@ def authority(host: str, port: int) -> str:
     return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
 
 
+def host_header(target: Target) -> str:
+    """Host of a forwarded plain-HTTP request: port 80 goes unnamed, as clients send it. Servers
+    build absolute redirects from Host; app.fobizz.com turned "app.fobizz.com:80" into
+    https://app.fobizz.com:80/gallery, a TLS handshake on port 80."""
+    if target.port == 80:
+        return f"[{target.host}]" if ":" in target.host else target.host
+    return authority(target.host, target.port)
+
+
 async def dial_target(target: Target, **kwargs):
     last_error = None
     for address in target.addresses:
@@ -169,7 +178,7 @@ class EgressProxy:
                         and line.split(":", 1)[0].lower()
                         not in {"host", "proxy-authorization", "proxy-connection", "connection"}
                     ]
-                    headers += [f"Host: {authority(target.host, target.port)}", "Connection: close"]
+                    headers += [f"Host: {host_header(target)}", "Connection: close"]
                     remote.write(
                         (f"{method} {path} HTTP/1.1\r\n" + "\r\n".join(headers) + "\r\n\r\n").encode("latin-1")
                     )

@@ -4,7 +4,7 @@ import base64
 import httpx
 import pytest
 
-from app.egress_proxy import EgressProxy, dial_target
+from app.egress_proxy import EgressProxy, dial_target, host_header
 from app.results import CrawlError
 from app.security import Target
 
@@ -53,9 +53,25 @@ async def test_guard_forwards_only_to_allowed_fixture_and_strips_proxy_auth():
             assert result.text == "OK"
         assert b"Proxy-Authorization" not in seen[0]
         assert b"GET /page HTTP/1.1" in seen[0]
+        assert f"Host: 127.0.0.1:{port}\r\n".encode() in seen[0]
     finally:
         server.close()
         await server.wait_closed()
+
+
+@pytest.mark.parametrize(
+    "target, host",
+    [
+        (Target("app.fobizz.com", 80, ("195.154.74.132",), "http"), "app.fobizz.com"),
+        (Target("example.org", 8080, ("93.184.216.34",), "http"), "example.org:8080"),
+        (Target("2001:db8::1", 80, ("2001:db8::1",), "http"), "[2001:db8::1]"),
+        (Target("2001:db8::1", 8080, ("2001:db8::1",), "http"), "[2001:db8::1]:8080"),
+    ],
+)
+def test_forwarded_host_names_the_port_only_when_it_is_not_80(target, host):
+    # Servers build absolute redirects from Host: app.fobizz.com answered "app.fobizz.com:80" with
+    # https://app.fobizz.com:80/gallery, a TLS handshake on port 80.
+    assert host_header(target) == host
 
 
 async def test_upstream_proxy_receives_pinned_destination_and_its_own_auth():
