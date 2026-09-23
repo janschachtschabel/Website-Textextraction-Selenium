@@ -62,6 +62,17 @@ def test_every_endpoint_says_what_it_does():
     assert not undocumented, f"without a description /docs shows only the function name: {undocumented}"
 
 
+def test_every_parameter_says_what_it_is_for():
+    undocumented = [
+        f"{verb.upper()} {path}: {parameter['in']} {parameter['name']}"
+        for path, operations in SCHEMA["paths"].items()
+        for verb, operation in operations.items()
+        for parameter in operation.get("parameters", [])
+        if not parameter.get("description")
+    ]
+    assert not undocumented, f"/docs shows these parameters without a word: {undocumented}"
+
+
 def test_the_service_explains_itself_on_its_front_page():
     assert SCHEMA["info"].get("description"), "/docs opens on the title alone"
 

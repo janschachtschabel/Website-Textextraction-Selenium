@@ -280,7 +280,14 @@ def _crawl_routes(application, config, admit, check_auth):
 
 # The id becomes part of a state-store key, so it may only be what token_urlsafe produces:
 # with a colon it could address a result row as if it were a job record.
-JobId = Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
+JobId = Annotated[
+    str,
+    Path(
+        pattern=r"^[A-Za-z0-9_-]{1,64}$",
+        description="The job_id that POST /jobs answered with: letters, digits, - and _, up to 64 "
+        "characters. An unknown or expired id answers 404, any other string 422.",
+    ),
+]
 
 
 def _job_routes(application, config, admit, check_auth):
