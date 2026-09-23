@@ -74,9 +74,11 @@ status and elapsed time - never the path or query string. `LOG_JSON=true` emits 
 same fields as JSON and, like the readable sink, without exception variable values.
 
 For PDF and Office files, install `pip install -e '.[documents]'`. For local PII
-processing, install `pip install -e '.[pii]'` and then, for example,
-`python -m spacy download de_core_news_lg`. Only the requested language is loaded,
-on first use. Models are never downloaded while processing a request.
+processing, install `pip install -e '.[pii]'`: it brings spaCy's `md` models for German
+and English, the ones the published image carries. For somewhat better recognition at ten
+times the size, install `de_core_news_lg` or `en_core_web_lg` and name it in
+`PRESIDIO_DE_MODEL` or `PRESIDIO_EN_MODEL`. Only the requested language is loaded, on
+first use. Models are never downloaded while processing a request.
 `requirements.txt` installs the same core dependencies from `pyproject.toml`.
 
 The declared ranges resolve to the newest compatible releases, which is what CI
@@ -474,14 +476,18 @@ it can be pasted into an editor that only understands that form.
   them (Trafilatura). An undeclared canonical URL falls back to the final URL, an
   undeclared site name to the host. Off by default: it parses the page once more,
   about 15-60 ms per document.
-- `anonymize=true`: local Presidio redacts Markdown. Missing/failed models produce
+- `anonymize=true`: local Presidio redacts Markdown, with spaCy's `md` model for the
+  language, which the published image carries. Missing/failed models produce
   an error with no page text, never an unredacted fallback. Links, metadata and
   screenshots are suppressed for these responses. Source URL metadata remains URL metadata;
-  automated PII detection is not a guarantee that every identifier is recognized.
+  automated PII detection is not a guarantee that every identifier is recognized, and it
+  also replaces words that are none, such as a heading read as an organisation. The first
+  anonymized request in a conversion worker waits for its model to load, 10 to 40 seconds;
+  [docs/settings.md](docs/settings.md#pii-removal) has the memory it holds.
 - Media `skip`/`none` return `extraction_status=skipped` with empty Markdown.
-  `metadata` uses local `ffprobe` with a bounded runtime; the published image does not
-  include it, so there `metadata` answers `failed` with a warning. See migration notes for
-  the restrictions on legacy `full` transcription.
+  `metadata` uses `ffprobe` with a bounded runtime, a protocol and format whitelist; the
+  published image carries it, elsewhere a missing `ffprobe` answers `failed` with a
+  warning. See migration notes for the restrictions on legacy `full` transcription.
 
 Each browser job has a new profile, preventing cross-request cookies/storage.
 Starting Chrome for it costs about 0.6-0.9 s on a desktop machine; ChromeDriver is

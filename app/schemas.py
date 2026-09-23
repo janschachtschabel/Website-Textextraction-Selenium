@@ -266,9 +266,9 @@ class CrawlOptions(BaseModel):
     media_conversion_policy: Literal["skip", "metadata", "full", "none"] | None = Field(
         None,
         description="What happens to audio and video. skip and none leave them unconverted "
-        "(extraction_status skipped); metadata returns the ffprobe record as JSON, which needs ffprobe "
-        "on the host - the published image has none, so there it fails with a warning; full is not "
-        "implemented and answers unsupported. Default: MEDIA_CONVERSION_POLICY, skip",
+        "(extraction_status skipped); metadata returns the ffprobe record as JSON - the published image "
+        "carries ffprobe, and without it the answer is failed with a warning; full is not implemented "
+        "and answers unsupported. Default: MEDIA_CONVERSION_POLICY, skip",
     )
     extract_links: bool = Field(
         False,
@@ -296,8 +296,8 @@ class CrawlOptions(BaseModel):
         False,
         description="Replace personal data in the Markdown, such as names, places, e-mail addresses and "
         "phone numbers, using Presidio with a spaCy model; anonymization says what was found. Links, "
-        "metadata and the screenshot are left out of such an answer. Needs the PII extra and the "
-        "language's model, which the published image does not include: there it answers 503",
+        "metadata and the screenshot are left out of such an answer. The published image carries "
+        "spaCy's md models for de and en; where the language's model is not installed, it answers 503",
     )
     anonymize_language: Literal["de", "en"] = Field(
         "de",

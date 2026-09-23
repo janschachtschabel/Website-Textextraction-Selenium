@@ -122,7 +122,7 @@ Each of these is what a request gets when it does not say otherwise.
 | `DEFAULT_JS_AUTO_WAIT` | `true` | Wait for the page to settle rather than returning at load. |
 | `HTML_CONVERTER` | `trafilatura` | First converter to try: `trafilatura`, `markitdown` or `bs4`. The others follow as fallbacks. |
 | `TRAFILATURA_CLEAN_MARKDOWN` | `true` | Extract the main content as Markdown. `false` returns the whole page as plain text. |
-| `MEDIA_CONVERSION_POLICY` | `skip` | `skip`/`none` ignore audio and video, `metadata` reads their tags with `ffprobe`, which the published image does not include. `full` is not implemented and is refused as unsupported. |
+| `MEDIA_CONVERSION_POLICY` | `skip` | `skip`/`none` ignore audio and video, `metadata` reads their tags with `ffprobe`, which the published image carries. `full` is not implemented and is refused as unsupported. |
 | `ALLOW_INSECURE_SSL` | `false` | Accept invalid certificates. |
 | `SSRF_PROTECTION` | `true` | Validate every hop and every connection against private and link-local address ranges. Leave it on. |
 
@@ -164,10 +164,17 @@ These are per Uvicorn process, so multiply by `UVICORN_WORKERS`.
 
 ## PII removal
 
-Only used with `pip install -e '.[pii]'` and the matching spaCy models. A model is loaded on
-first use, never downloaded while a request is running.
+The published image and `pip install -e '.[pii]'` bring spaCy's `md` models for both
+languages. A model is loaded on first use, in each conversion worker, and never downloaded
+while a request is running; one that is not installed answers 503.
+
+Measured on the 3.1.0 image: the first anonymized request in a worker takes 10 to 40 seconds
+while the model loads, later ones about 0.4 seconds. A loaded `md` model holds about 350 MiB
+in its worker, so two conversion workers with both languages loaded need about 1.4 GB on
+top of the service. A worker replaced after `WORKER_MAX_JOBS` loads its model again on its
+next anonymized request.
 
 | Setting | Default | What it does |
 |---|---|---|
-| `PRESIDIO_DE_MODEL` | `de_core_news_lg` | German model for `anonymize`. |
-| `PRESIDIO_EN_MODEL` | `en_core_web_lg` | English model. |
+| `PRESIDIO_DE_MODEL` | `de_core_news_md` | German model for `anonymize`. `de_core_news_lg` recognizes a little more at ten times the size, once installed. |
+| `PRESIDIO_EN_MODEL` | `en_core_web_md` | English model; `en_core_web_lg` likewise. |

@@ -46,8 +46,8 @@ MEANINGS = {
     502: "The page could not be fetched or rendered: the connection, TLS or download failed, the "
     "redirects looped or exceeded ten, Chrome's navigation failed, or a conversion worker failed",
     503: "The service could not do the work: the crawl queue is full, it is shutting down, a worker "
-    "process exited, or anonymize was set and the anonymizer failed or is not installed - the "
-    "published image has no PII extra and no language model",
+    "process exited, or anonymize was set and the anonymizer failed or its language model is not "
+    "installed - the published image carries both",
     504: "timeout_ms ran out - while the URL waited for capacity, for the host's rate limit, or "
     "while it was fetched and converted",
 }
