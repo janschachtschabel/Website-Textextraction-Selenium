@@ -84,18 +84,49 @@ Engineering decisions, argued here:
   already knows mark it, whatever its status; Cloudflare's page runs JavaScript. A 404, a
   429 or a 5xx stays on HTTP: rendering would not change the answer, and a 429 asks for
   less traffic, not more.
-- **Chrome waits while a challenge shows**, with either strategy: while the title is a
-  challenge phrase, it keeps polling until the page moved on, the auto-wait limit passed
-  or the deadline ran out, then reads the status again and waits for content as usual.
-  Without it, `speed` returns the challenge that a moment later lets the page through, and
-  `accuracy` does whenever the challenge finishes after the load event. `js_auto_wait=false`
-  switches it off along with the other waits.
+- **Chrome waits while a challenge shows**, with either strategy: while the title names a
+  check a browser can pass ("just a moment", "checking your browser", "verifying you are
+  human"), it polls for up to 10 s (`CHALLENGE_LIMIT_SECONDS`), then reads the status again
+  and waits for content as usual; an expired deadline ends it with 504 like every other
+  wait. Cloudflare's "Attention Required!" block page counts as blocked but is neither
+  rendered nor awaited: it never lets a browser through. Without the wait, `speed` returns
+  the challenge that a moment later lets the page through, and `accuracy` does whenever the
+  challenge finishes after the load event. `js_auto_wait=false` switches it off along with
+  the other waits. A fake-driver test covers a challenge that never clears; the Chrome test
+  covers one that does.
 - **The wait falls back to open shadow roots** when the light DOM has no text, skipping
   `style`, `script`, `template` and `link` children. Pages with light-DOM text wait exactly
   as before.
 - **`CACHE_VERSION` becomes `extraction-v5`**: stored thin answers would otherwise be served
   again, for up to a day through revalidation.
 - **Release 3.2.0**, not a patch: auto's default strategy changes and it renders more pages.
+
+## Second package: data requests, and more sources
+
+Decided by the user on 2026-09-23 after the first end-to-end run: wait for running data
+requests before the release, test more of the large OER sources, then release 3.2.0.
+
+- **Evidence.** PhET's list arrived 2.2 s after its page load, together with the last of the
+  five XHR requests that were running at that moment. The wait for 0.3 or 1 s of unchanged
+  text can end in between: in one run all modes got 25 words, in three earlier ones
+  `accuracy` got 419.
+- **Decision.** Content counts as settled only while no XHR, fetch or script request of the
+  page is running and none started or ended within the stability window - for at most
+  `REQUEST_WAIT_SECONDS` (5 s) after the wait began. Scripts count because diagrams.net builds
+  its app from scripts it loads after the document: with requests for data only, `speed` still
+  read its 62-word landing text; with scripts, the app's 1983 words (ZDF took 7.4 s instead of
+  4.5 s for the same text). After that, text stability alone decides
+  again, so a page that polls or keeps a connection open settles as before, just later.
+  The wait reads Chrome's performance log as it goes and hands every entry back, since the
+  main document's status is read from the same log afterwards.
+- **Tests first.** Fake-driver tests: the wait lasts until the request the content depends
+  on finished; a request that never ends holds it for `REQUEST_WAIT_SECONDS` only; the log
+  read during the wait is handed back; each for XHR, fetch and script. Two Chrome fixture
+  pages load their content from a slow endpoint, one with fetch and one with a script, and
+  must be read with it, with `speed`.
+- **More sources.** Two real material pages each for about 50 of the largest sources in
+  WLO's list, taken from the WLO index, through fast, auto and js; failures sorted by
+  cause, fixes only where a cause is shown, then the same run again.
 
 ## Out of scope
 
