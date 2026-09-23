@@ -1188,3 +1188,28 @@ Not a task: it needs the user.
 - Rows of a job that finishes early occupy disk until its original deadline plus
   `JOB_RESULT_TTL`, unreachable once the record has expired.
 - No server-side resume - decided.
+
+## Implementation notes
+
+Carried out on 2026-09-23 on the branch `feature/job-result-rows`, so that `main` stayed
+releasable at 2.3.1 while the contract changed. Where the work departed from the text
+above:
+
+- **Task 3.** The first red was an `ImportError` at collection - the tests import
+  `_row_key` - rather than the per-test failures listed. The reason was the right one: the
+  read half did not exist.
+- **Tasks 3 and 4.** `rows` and `_run` measure 5 on the complexity gate, one above the
+  estimate; the gate is 10.
+- **Task 6.** One text the plan did not list: `JobAccepted.status_url` was described as the
+  "Path to poll for the result", which the change made false. It now names status and
+  progress.
+- **Task 7.** `test_rows_written_before_a_shutdown_stay_readable` waits for its rows at the
+  store (`rows_stored`), not through the results route. Written as planned, it waited
+  through the route, and the red-proof failed it before the restart - proving nothing the
+  second test did not. Waiting at the store, the same break fails it where it should:
+  after the restart, `[] == [0, 1]`.
+- **Task 8.** The plan said an interrupted job's rows stay readable until its deadline plus
+  `JOB_RESULT_TTL`. A graceful shutdown saves the record as finished, so it expires
+  `JOB_RESULT_TTL` after the shutdown, and the route answers 404 from then on. The
+  documents say what holds in every case: the rows stay readable as long as the record does.
+
