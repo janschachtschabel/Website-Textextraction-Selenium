@@ -25,9 +25,11 @@ class NoBrowser:
 @pytest.fixture
 def jobs_api(tmp_path, article_html):
     @asynccontextmanager
-    async def start(delay=0.0, **overrides):
+    async def start(delay=0.0, hold=None, **overrides):
         async def upstream(request):
             await asyncio.sleep(delay)
+            if hold is not None and request.url.path == "/held":
+                await hold.wait()
             if request.url.path == "/blocked":
                 return httpx.Response(429, content=b"<main>Rate limited</main>", headers={"content-type": "text/html"})
             return httpx.Response(200, content=article_html.encode(), headers={"content-type": "text/html"})
@@ -102,6 +104,28 @@ def watch_rows(monkeypatch, jobs, observe):
         await original(job_id, seq, row, keep)
 
     monkeypatch.setattr(jobs, "_write_row", spy)
+
+
+async def rows_when(client, job_id, count, seconds=10):
+    """Poll a running job's rows until count of them exist."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        rows = (await client.get(f"/jobs/{job_id}/results?limit=100")).json()["results"]
+        if len(rows) >= count:
+            return rows
+        await asyncio.sleep(0.05)
+    pytest.fail(f"fewer than {count} rows appeared")
+
+
+async def rows_stored(resources, job_id, count, seconds=10):
+    """Wait until the runner has stored count rows, looking at the store rather than the
+    route: a test of what the route reads must not need the route to get started."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if resources.state.get(_row_key(job_id, count - 1)) is not None:
+            return
+        await asyncio.sleep(0.05)
+    pytest.fail(f"fewer than {count} rows were stored")
 
 
 def saves(monkeypatch, jobs):
@@ -356,3 +380,32 @@ async def test_a_result_that_cannot_be_stored_fails_the_job(jobs_api, monkeypatc
         job = (await client.post("/jobs", json={"urls": urls, "max_concurrency": 1})).json()
         body = await finished(client, job["status_url"])
     assert body["status"] == "failed" and body["error"] == "Job failed (OSError)"
+
+
+async def test_rows_written_before_a_shutdown_stay_readable(jobs_api):
+    """A restart still ends the job, but no longer takes the finished URLs with it. Their
+    positions tell a client exactly which URLs to submit again."""
+    urls = ["https://example.com/a", "https://example.com/b", "https://example.com/held"]
+    async with jobs_api(hold=asyncio.Event()) as (client, resources):
+        job = (await client.post("/jobs", json={"urls": urls, "max_concurrency": 1})).json()
+        await rows_stored(resources, job["job_id"], 2)
+    async with jobs_api() as (client, _):  # the next process, on the same store
+        body = (await client.get(job["status_url"])).json()
+        rows = await all_rows(client, job["job_id"])
+    assert body["status"] == "failed" and body["error"] == "Interrupted: the service shut down"
+    assert sorted(row["position"] for row in rows) == [0, 1]
+
+
+async def test_a_reader_sees_every_finished_row_before_the_count_is_saved(jobs_api, monkeypatch):
+    """The saved count trails the rows by up to PROGRESS_EVERY_SECONDS. Here it is held at 0
+    on purpose; the rows must be readable regardless."""
+    monkeypatch.setattr("app.jobs.PROGRESS_EVERY_SECONDS", 3600.0)
+    hold = asyncio.Event()
+    urls = ["https://example.com/a", "https://example.com/b", "https://example.com/held"]
+    async with jobs_api(hold=hold) as (client, _):
+        job = (await client.post("/jobs", json={"urls": urls, "max_concurrency": 1})).json()
+        rows = await rows_when(client, job["job_id"], 2)
+        status = (await client.get(job["status_url"])).json()
+        hold.set()
+    assert status["progress"]["done"] == 0, "the throttle was meant to hold the saved count back"
+    assert sorted(row["position"] for row in rows) == [0, 1]
