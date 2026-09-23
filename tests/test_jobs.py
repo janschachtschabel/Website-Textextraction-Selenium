@@ -133,6 +133,14 @@ async def test_a_job_runs_in_the_background_and_reports_every_url(jobs_api):
     assert rows[1]["error"] == "Upstream status 429"
 
 
+async def test_a_job_points_to_its_results_from_the_start(jobs_api):
+    async with jobs_api() as (client, _):
+        job = (await client.post("/jobs", json={"urls": ["https://example.com/a"]})).json()
+        body = await finished(client, job["status_url"])
+    assert job["results_url"] == f"/jobs/{job['job_id']}/results"
+    assert body["results_url"] == job["results_url"] and "result" not in body
+
+
 async def test_unknown_jobs_answer_404(jobs_api):
     async with jobs_api() as (client, _):
         response = await client.get("/jobs/not-a-job")

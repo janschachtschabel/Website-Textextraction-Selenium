@@ -54,9 +54,9 @@ the browser.
 
 **Several URLs.** `POST /crawl/batch` takes as many as the operator allows - 50 unless
 `MAX_URLS_PER_REQUEST` was raised - and answers once all of them are done. `POST /jobs`
-takes the same body, answers at once with a job id, and is polled at `GET /jobs/{job_id}`,
-which reports how many URLs are finished while it runs. Use it when a batch outlives the
-client's patience.
+takes the same body, answers at once with a job id, and is polled at `GET /jobs/{job_id}`;
+its results arrive page by page at `GET /jobs/{job_id}/results` as the URLs finish. Use it
+when a batch outlives the client's patience.
 
 **Authentication.** When the operator configures an API key, every endpoint except `/` and
 `/health` requires `Authorization: Bearer <key>`. This page needs it too: a browser is
@@ -303,27 +303,31 @@ def _job_routes(application, config, admit, check_auth):
         Same body and the same crawling as `/crawl/batch`; only the delivery differs. Use
         it when the connection would not survive the wait: proxies and tunnels commonly cut
         a request at about 125 seconds, while a batch runs as long as its deadline allows.
-        Poll `status_url`; the record stays readable for an hour after the job finishes."""
+        Poll `status_url` for progress and read the results from `results_url` as they
+        finish; both stay readable for `JOB_RESULT_TTL` after the job ends."""
         admit(len(request.urls))
         job_id = await application.state.resources.jobs.submit(
             [str(url) for url in request.urls], resolve_options(request, config), request.max_concurrency
         )
-        return JobAccepted(job_id=job_id, status="queued", status_url=f"/jobs/{job_id}")
+        return JobAccepted(
+            job_id=job_id, status="queued", status_url=f"/jobs/{job_id}", results_url=f"/jobs/{job_id}/results"
+        )
 
     @application.get(
         "/jobs/{job_id}", response_model=JobStatus, dependencies=[Security(check_auth)], summary="Poll a background job"
     )
     async def job_status(job_id: JobId):
-        """Report a submitted batch, and carry the result once it is done.
+        """Report how far a job has got, and where its results are.
 
+        The results themselves are read from `results_url`, while the job runs and after.
         Answers 404 when the id is unknown or its record has expired."""
         record = await application.state.resources.jobs.status(job_id)
         if record is None:
             raise HTTPException(404, "Unknown or expired job")
         # .get, not [name]: a record written by an earlier release predates a field added
         # since, and the store outlives an upgrade.
-        fields = {name: record.get(name) for name in JobStatus.model_fields if name != "job_id"}
-        return JobStatus(job_id=job_id, **fields)
+        fields = {name: record.get(name) for name in JobStatus.model_fields if name not in {"job_id", "results_url"}}
+        return JobStatus(job_id=job_id, results_url=f"/jobs/{job_id}/results", **fields)
 
     @application.get(
         "/jobs/{job_id}/results",

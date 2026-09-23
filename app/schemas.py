@@ -108,7 +108,12 @@ CRAWL_ANSWER_EXAMPLE = {
     "coalesced": False,
     "revalidated": False,
 }
-JOB_EXAMPLE = {"job_id": "6l2fSU_R43ujmWd46UmHQA", "status": "queued", "status_url": "/jobs/6l2fSU_R43ujmWd46UmHQA"}
+JOB_EXAMPLE = {
+    "job_id": "6l2fSU_R43ujmWd46UmHQA",
+    "status": "queued",
+    "status_url": "/jobs/6l2fSU_R43ujmWd46UmHQA",
+    "results_url": "/jobs/6l2fSU_R43ujmWd46UmHQA/results",
+}
 
 
 ITEM_EXAMPLE = {
@@ -138,7 +143,7 @@ JOB_STATUS_EXAMPLE = {
     "submitted_at": "2026-09-21T07:17:14+00:00",
     "finished_at": "2026-09-21T07:17:16+00:00",
     "progress": {"done": 2, "succeeded": 1, "total": 2},
-    "result": BATCH_ANSWER_EXAMPLE,
+    "results_url": JOB_EXAMPLE["results_url"],
     "error": None,
 }
 
@@ -404,7 +409,8 @@ class JobAccepted(BaseModel):
     model_config = ConfigDict(json_schema_extra={"examples": [JOB_EXAMPLE]})
     job_id: str = Field(description="Identifier to poll the job with")
     status: Literal["queued"] = Field(description="A new job is always queued")
-    status_url: str = Field(description="Path to poll for the result")
+    status_url: str = Field(description="Path to poll for the status and progress")
+    results_url: str = Field(description="Path to read the results from, as they finish")
 
 
 class JobProgress(BaseModel):
@@ -424,7 +430,7 @@ class JobStatus(BaseModel):
     submitted_at: str = Field(description="When the job was accepted, ISO 8601")
     finished_at: str | None = Field(None, description="When it finished, absent while it still runs")
     progress: JobProgress | None = Field(None, description="How many URLs are done, while the job runs and after")
-    result: BatchCrawlResponse | None = Field(None, description="The batch result, present once the job is done")
+    results_url: str = Field(description="Path to read the results from, while the job runs and after")
     error: str | None = Field(None, description="Why the job failed, absent otherwise")
 
 
