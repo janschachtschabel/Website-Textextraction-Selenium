@@ -84,6 +84,34 @@ async def test_corrupt_deflate_bodies_are_still_rejected():
         await read_body(response, 4096)
 
 
+async def test_an_unknown_content_encoding_is_read_as_the_plain_body_browsers_see():
+    """medienportal.siemens-stiftung.org sends "Content-Encoding: (with " over plain HTML. Chrome reads
+    such a body as it is; the service answered 502 "Unsupported HTTP content encoding"."""
+    from app.body_reader import read_body
+
+    response = httpx.Response(200, stream=GzipStream(b"<p>Plain page</p>"), headers={"content-encoding": "(with "})
+    assert await read_body(response, 4096) == (b"<p>Plain page</p>", False)
+
+
+async def test_x_gzip_is_gzip():
+    from app.body_reader import read_body
+
+    response = httpx.Response(200, stream=GzipStream(gzip.compress(b"page")), headers={"content-encoding": "x-gzip"})
+    assert await read_body(response, 4096) == (b"page", False)
+
+
+async def test_a_known_encoding_the_service_cannot_decode_is_still_refused():
+    import pytest
+
+    from app.body_reader import read_body
+    from app.results import CrawlError
+
+    for encoding in ("br", "zstd", "compress"):
+        response = httpx.Response(200, stream=GzipStream(b"compressed"), headers={"content-encoding": encoding})
+        with pytest.raises(CrawlError, match="Unsupported HTTP content encoding"):
+            await read_body(response, 4096)
+
+
 class NoBody(httpx.AsyncByteStream):
     """A 304 carries no body at all - not an empty chunk, no chunk."""
 

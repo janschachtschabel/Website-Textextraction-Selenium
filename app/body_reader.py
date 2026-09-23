@@ -4,6 +4,11 @@ import zlib
 
 from .results import CrawlError
 
+# Content codings from the IANA registry this reader cannot decode. Any other unknown token is
+# read as the plain body, as browsers do: medienportal.siemens-stiftung.org sends
+# "Content-Encoding: (with " over plain HTML.
+_UNDECODABLE = {"aes128gcm", "br", "compress", "dcb", "dcz", "exi", "pack200-gzip", "x-compress", "zstd"}
+
 
 def _deflate_wbits(head: bytes) -> int:
     """Accept raw deflate (wbits -15) as HTTPX does; some servers omit the RFC 1950 wrapper."""
@@ -20,8 +25,9 @@ async def read_body(response, limit: int) -> tuple[bytes, bool]:  # noqa: C901
     if response.is_stream_consumed:
         return response.content[:limit], len(response.content) > limit
     encoding = response.headers.get("content-encoding", "identity").strip().lower()
-    if encoding not in {"identity", "", "gzip", "deflate"}:
+    if "," in encoding or encoding in _UNDECODABLE:
         raise CrawlError("Unsupported HTTP content encoding")
+    encoding = {"x-gzip": "gzip"}.get(encoding, encoding)
     compressed = encoding in {"gzip", "deflate"}
     decoder = None  # deflate needs the first bytes to tell wrapped from raw
     data = bytearray()
