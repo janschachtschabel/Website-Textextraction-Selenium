@@ -238,7 +238,7 @@ installed FastAPI: verified on 0.141.1, two routes sharing one `Annotated` alias
 | Cancelling pending URLs interrupts browser work | It is the path an expiring deadline already takes, and B01/B06 made it clean up. Task 1's stop test runs it |
 | The gc-based memory test counts nothing on some runtime and passes vacuously | Its red-proof retains every item and must see the count rise. If it does not rise, the test is broken, and that is a finding |
 | A reader implemented rows-first would end one page early | `rows()` reads the record first and says why in its docstring; review item |
-| Rows of a job that finishes early outlive its record until the original deadline plus the TTL | Disk only, unreachable without the record; a known limitation |
+| Rows of a job that finishes early outlive its record until the original deadline plus the TTL | Fixed in review: both ends of a job touch every row to the record's expiry (see Implementation notes) |
 
 ## Open questions
 
@@ -1188,8 +1188,6 @@ Not a task: it needs the user.
 
 - A lost job is still detected only at its deadline plus 30 seconds.
 - After a crash, the record's `progress` can trail its rows; the rows are complete.
-- Rows of a job that finishes early occupy disk until its original deadline plus
-  `JOB_RESULT_TTL`, unreachable once the record has expired.
 - No server-side resume - decided.
 
 ## Implementation notes
