@@ -72,13 +72,15 @@ presents ten URLs to the queue. Forty jobs of fifty would present forty times th
 concurrency at once and start collecting `503 Crawl queue is full`.
 
 While it runs, `GET /jobs/{job_id}` reports `progress` - how many URLs are finished and how
-many produced a result. Three things this does **not** do, and they matter at this size:
+many produced a result - and each finished URL can be read at once from `results_url`, as a
+row naming its position in the request. A job holds at most `max_concurrency` results in
+memory. Before 3.0.0 it held all of them until it ended: measured at 2000 URLs, 22 MB where
+pages yield 10 KB of Markdown, 63 MB at 30 KB, 165 MB at 80 KB - per job and per worker
+process, with `MAX_ACTIVE_JOBS` multiplying it.
 
-- the result is one JSON record, built in memory and written when the batch ends. Measured
-  at 2000 URLs: 22 MB where pages yield 10 KB of Markdown, 63 MB at 30 KB, 165 MB at 80 KB -
-  per job, per worker process, held until it finishes. `MAX_ACTIVE_JOBS` multiplies it
-- per-URL *results* arrive only with that record; progress is counts
-- a container restart loses an unfinished job, which is then reported `failed`
+One limit remains at this size: a container restart still ends an unfinished job, which is
+then reported `failed`. The rows it wrote before stay readable, and their positions say
+which URLs to submit again.
 
 ## Binding and access
 
@@ -135,7 +137,7 @@ These are per Uvicorn process, so multiply by `UVICORN_WORKERS`.
 | `MAX_QUEUE_SIZE` | `50` | URLs waiting for capacity before new ones are refused. |
 | `QUEUE_TIMEOUT_SECONDS` | `60` | How long a URL waits for capacity before it fails. |
 | `MAX_ACTIVE_JOBS` | `10` | Unfinished background jobs (`POST /jobs`) per process. |
-| `JOB_RESULT_TTL` | `3600` | Seconds a finished job's result stays readable. |
+| `JOB_RESULT_TTL` | `3600` | Seconds a finished job's record and its result rows stay readable. |
 | `HTTP_MAX_CONNECTIONS` | `16` | Connection pool for the HTTP fetcher. |
 | `SELENIUM_MAX_POOL_SIZE` | `2` | Browser worker processes. None start until a browser job arrives. |
 | `CONVERSION_WORKERS` | `2` | Conversion worker processes. |

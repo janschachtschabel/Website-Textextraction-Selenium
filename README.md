@@ -10,6 +10,10 @@ with it. 2.0 installs a hash-checked dependency set in a Debian 13 image with Ch
 `/docs` names every field and offers a request that works instead of a body of `"string"`.
 2.1 publishes that image, so a panel that deploys from the URL of a compose file can run
 this service without a checkout.
+3.0 stores a background job's results one URL at a time, as they finish: they can be read
+while the job runs, and a restart no longer loses the finished ones. A client that read
+`result` from `GET /jobs/{job_id}` has to change; [docs/migration-3.0.md](docs/migration-3.0.md)
+says how.
 Along the way: 0.9 kept a page's mathematics, turning presentation MathML into LaTeX and
 no longer dropping formulas a page hides from sighted readers, and stopped worker teardown
 from blocking the event loop; 0.8 added Python 3.14 support, full-page screenshots and
@@ -358,8 +362,9 @@ cleanup can add a short margin to the response deadline.
 
 A client that cannot hold a connection open for the whole batch, for example behind
 the Colab tunnel, which ends requests after about 125 seconds, submits the same body
-to `POST /jobs`. It answers 202 with a `job_id` at once; `GET /jobs/{job_id}` returns
-`queued`, `running`, `done` with the batch `result`, or `failed` with an `error`:
+to `POST /jobs`. It answers 202 at once with a `job_id`, a `status_url` and a
+`results_url`. `GET /jobs/{job_id}` reports `queued`, `running`, `done`, or `failed` with
+an `error`; the results are read from `results_url` as the URLs finish:
 
 ```bash
 curl http://127.0.0.1:8000/jobs \
@@ -367,18 +372,46 @@ curl http://127.0.0.1:8000/jobs \
   -H 'Content-Type: application/json' \
   -d '{"urls":["https://example.com","https://www.python.org"],"timeout_ms":300000}'
 curl http://127.0.0.1:8000/jobs/<job_id> -H "Authorization: Bearer $API_KEY"
+curl "http://127.0.0.1:8000/jobs/<job_id>/results?offset=0&limit=100" -H "Authorization: Bearer $API_KEY"
 ```
 
-While it runs, the poll carries `progress`: `done`, `succeeded` and `total`. It is written
-at most every two seconds, so a long job does not mean one state-store write per URL, and
-the final save always carries the last count. Per-URL *results* arrive with the finished
-batch, not before.
+While it runs, the poll carries `progress`: `done`, `succeeded` and `total`. It is saved
+at most every two seconds, and the final save always carries the last count.
 
-Job records live in the shared state store for `JOB_RESULT_TTL` (one hour) after they
-finish, so any Uvicorn worker answers the poll. The work runs in the process that
-accepted it; `MAX_ACTIVE_JOBS` (10) bounds unfinished jobs per process (503 beyond).
-A shutdown marks unfinished jobs `failed`, and a job whose process stopped without
-that is reported as lost 30 seconds after its deadline.
+Each URL is stored as a row the moment it finishes. `GET /jobs/{job_id}/results` pages
+through them: start at `offset=0` and pass each page's `next_offset` on; `limit` is 20 by
+default and 100 at most. Rows come in the order the URLs finished, and each names its
+`position` in the request. An empty page from a job that is still running means nothing
+new yet; from one that has ended, nothing more. A job holds at most `max_concurrency`
+results in memory, however long its list:
+
+```python
+import time
+
+import httpx
+
+
+def results(base, job_id, key):
+    """Yield each finished URL of a job as soon as it is stored."""
+    offset, headers = 0, {"Authorization": f"Bearer {key}"}
+    while True:
+        params = {"offset": offset, "limit": 100}
+        page = httpx.get(f"{base}/jobs/{job_id}/results", params=params, headers=headers).json()
+        yield from page["results"]
+        offset = page["next_offset"]
+        if not page["results"]:
+            if page["status"] in ("done", "failed"):
+                return
+            time.sleep(2)
+```
+
+Job records and their rows live in the shared state store for `JOB_RESULT_TTL` (one hour)
+after the job finishes, so any Uvicorn worker answers. The work runs in the process that
+accepted it; `MAX_ACTIVE_JOBS` (10) bounds unfinished jobs per process (503 beyond). A
+shutdown marks unfinished jobs `failed`, and a job whose process stopped without that is
+reported as lost 30 seconds after its deadline. Either way, the rows it had written stay
+readable as long as its record does: submit the URLs whose positions are missing as a new
+job.
 
 ## Options and privacy
 
