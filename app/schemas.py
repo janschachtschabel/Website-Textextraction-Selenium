@@ -415,7 +415,7 @@ def resolve_options(request: CrawlOptions, config: Settings = settings) -> Crawl
 
 
 class LinkInfo(BaseModel):
-    url: str = Field(description="Absolute URL of the link")
+    url: str = Field(description="Absolute URL of the link, resolved against the page's final URL")
     text: str | None = Field(None, description="Link text, absent when the link wraps an image only")
     internal: bool = Field(description="True while the link stays on the host of the crawled page")
     category: Literal[
@@ -424,49 +424,126 @@ class LinkInfo(BaseModel):
 
 
 class PageMetadata(BaseModel):
-    title: str | None = Field(None, description="Declared title, else the <title> element")
-    description: str | None = Field(None, description="Summary the page declares for search engines")
-    author: str | None = Field(None, description="Declared author of the page")
-    date: str | None = Field(None, description="Publication date as YYYY-MM-DD")
-    site_name: str | None = Field(None, description="Declared site name, else the host name")
-    canonical_url: str | None = Field(None, description="Declared canonical URL, else the final URL")
-    language: str | None = Field(None, description="The <html lang> attribute")
+    """What the page declares about itself, read by fixed rules from its meta tags, JSON-LD and
+    markup - no model involved. Each field is cut at 1000 characters."""
+
+    title: str | None = Field(
+        None, description="The title the page declares (og:title, JSON-LD headline), else its <title> or headings"
+    )
+    description: str | None = Field(
+        None, description="Summary the page declares for search engines and previews: meta description, og:description"
+    )
+    author: str | None = Field(
+        None,
+        description="Author the page declares in meta tags, JSON-LD or author markup; a single word without "
+        "a space is dropped as a handle",
+    )
+    date: str | None = Field(
+        None,
+        description="Publication date as YYYY-MM-DD: the original rather than the last update, from meta "
+        "tags, JSON-LD, <time> elements, the URL or the text, never in the future",
+    )
+    site_name: str | None = Field(
+        None, description="Site name the page declares (og:site_name, JSON-LD publisher), else taken from the host"
+    )
+    canonical_url: str | None = Field(
+        None, description="Canonical URL the page declares (<link rel=canonical>, og:url), else the final URL"
+    )
+    language: str | None = Field(None, description="The page's <html lang> attribute as written, such as de or en-US")
 
 
 class AnonymizationResult(BaseModel):
-    entities_found: list[str] = Field(default_factory=list, description="Kinds of personal data that were replaced")
+    entities_found: list[str] = Field(
+        default_factory=list,
+        description="Kinds of personal data replaced, as Presidio names them, such as PERSON, LOCATION or "
+        "EMAIL_ADDRESS",
+    )
     entity_count: int = Field(0, description="How many occurrences were replaced")
     warning: str | None = Field(None, description="Why the anonymisation is incomplete, when it is")
 
 
 class CrawlResponse(BaseModel):
     model_config = ConfigDict(json_schema_extra={"examples": [CRAWL_ANSWER_EXAMPLE]})
-    request_mode: Literal["fast", "js", "auto"] = Field(description="Mode used, after the operator's defaults")
-    fetch_engine: Literal["http", "selenium"] = Field(
-        description="http for the plain response, selenium when Chrome rendered the page"
+    request_mode: Literal["fast", "js", "auto"] = Field(
+        description="The mode that applied: the one requested, else the operator's DEFAULT_MODE"
     )
-    converter: str | None = Field(None, description="Converter that produced the Markdown, null when none succeeded")
-    extraction_status: ExtractionStatus = Field(description="Outcome of the conversion step")
-    success: bool = Field(description="True when the crawl produced usable text")
-    requested_url: str = Field(description="URL as it was requested")
-    final_url: str = Field(description="URL after all redirects")
-    status_code: int | None = Field(description="Upstream status; null when the browser cannot observe it")
-    redirected: bool = Field(description="True when the final URL differs from the requested one")
-    content_type: str | None = Field(description="Content-Type the upstream declared")
-    markdown: str = Field(description="The extracted text as Markdown")
-    markdown_length: int = Field(description="Characters in the Markdown")
-    word_count: int = Field(description="Words in the Markdown")
-    error_page_detected: bool = Field(description="True when the text reads as an error or block page, not content")
-    truncated: bool = Field(False, description="True when the body reached max_bytes and was cut")
-    warnings: list[str] = Field(default_factory=list, description="What degraded the result without failing it")
-    links: list[LinkInfo] | None = Field(None, description="Present when extract_links was set")
-    metadata: PageMetadata | None = Field(None, description="Present when extract_metadata was set")
-    screenshot_base64: str | None = Field(None, description="PNG as base64, present when a screenshot was taken")
-    anonymization: AnonymizationResult | None = Field(None, description="Present when anonymize was set")
-    elapsed_ms: int = Field(description="Time from accepting the request to answering it")
-    cached: bool = Field(False, description="Answered from the result cache")
-    coalesced: bool = Field(False, description="Answered from a request for the same URL already in flight")
-    revalidated: bool = Field(False, description="Cached result confirmed unchanged by the upstream (304)")
+    fetch_engine: Literal["http", "selenium"] = Field(
+        description="What produced the page: http for the plain response, selenium when Chrome rendered it "
+        "- in auto mode only when the plain HTML was a script-built shell"
+    )
+    converter: str | None = Field(
+        None,
+        description="What produced the text: trafilatura, markitdown or bs4 for HTML; text for plain text, "
+        "JSON, XML and feeds, returned as they are; markitdown for PDF and Office documents; ffprobe for "
+        "media metadata. Null when none produced any",
+    )
+    extraction_status: ExtractionStatus = Field(
+        description="Outcome of the conversion. ok: text was extracted. empty: there was nothing to "
+        "extract. blocked: the site answered 400 or more, or the page is a bot check such as 'Just a "
+        "moment...'. skipped: audio or video left out by media_conversion_policy. unsupported: a format "
+        "the service does not convert. failed: the conversion failed, and warnings says why"
+    )
+    success: bool = Field(
+        description="True only for usable content: extraction_status ok with text, a 2xx status, nothing "
+        "cut by max_bytes and, in Chrome, a page that settled. In a batch or job, error names the rule "
+        "that failed first"
+    )
+    requested_url: str = Field(description="The URL as requested, in normalised form")
+    final_url: str = Field(
+        description="Where the page ended up: after HTTP redirects, or in Chrome after redirects and scripts"
+    )
+    status_code: int | None = Field(
+        description="HTTP status of the page itself, not of its images or frames; null when Chrome could not observe it"
+    )
+    redirected: bool = Field(description="True when final_url differs from requested_url")
+    content_type: str | None = Field(description="Content-Type the site declared, such as text/html; charset=utf-8")
+    markdown: str = Field(
+        description="The extracted text as Markdown; plain text with trafilatura_clean_markdown=false. With "
+        "anonymize, personal data is replaced by placeholders such as <PERSON>. Empty when nothing was "
+        "extracted"
+    )
+    markdown_length: int = Field(description="Characters in markdown")
+    word_count: int = Field(description="Words in markdown, counted between whitespace")
+    error_page_detected: bool = Field(
+        description="True when the answer is not content: blocked, or a conversion that came out empty or failed"
+    )
+    truncated: bool = Field(
+        False, description="True when the page reached max_bytes and was cut; the answer is then not a success"
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Everything that degraded the answer without failing it, one sentence each: a cut "
+        "response, a screenshot the HTTP path could not take, browser connections the network policy "
+        "refused, metadata that could not be read",
+    )
+    links: list[LinkInfo] | None = Field(
+        None, description="The page's links, when extract_links was set and the page was HTML; left out for anonymize"
+    )
+    metadata: PageMetadata | None = Field(
+        None,
+        description="What the page declares about itself, when extract_metadata was set and the page was "
+        "HTML; left out for anonymize",
+    )
+    screenshot_base64: str | None = Field(
+        None, description="PNG of the rendered page as base64, when screenshot was set and Chrome rendered it"
+    )
+    anonymization: AnonymizationResult | None = Field(
+        None, description="What anonymize found and replaced, when it was set"
+    )
+    elapsed_ms: int = Field(description="Milliseconds from accepting this URL to answering it, queue time included")
+    cached: bool = Field(
+        False,
+        description="True when the answer came from the result cache, which keeps a successful result "
+        "RESULT_CACHE_TTL seconds (300)",
+    )
+    coalesced: bool = Field(
+        False, description="True when an identical request was already running and its result is shared here"
+    )
+    revalidated: bool = Field(
+        False,
+        description="True when the cached result had expired, but the site confirmed it unchanged (304) to "
+        "a conditional request; ETag and Last-Modified are kept REVALIDATION_TTL for that, 24 h. HTTP only",
+    )
 
 
 class BatchCrawlItemResult(BaseModel):
@@ -478,7 +555,12 @@ class BatchCrawlItemResult(BaseModel):
         description="The crawl result. Absent only when the URL was refused before it was "
         "crawled; a page that answered 404 carries both its result and the reason",
     )
-    error: str | None = Field(None, description="Why this URL failed, absent when it succeeded")
+    error: str | None = Field(
+        None,
+        description="Why this URL is not a success, absent when it is: its status (Upstream status 404), "
+        "its extraction (Extraction empty, truncated or incomplete), or the error that stopped it, such "
+        "as Crawl deadline exceeded",
+    )
 
 
 class BatchCrawlResponse(BaseModel):
