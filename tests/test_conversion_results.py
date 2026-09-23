@@ -31,6 +31,14 @@ def test_kmap_inline_attachment_uses_final_origin():
     assert "https://school.example/app/files/diagram.pdf" in result.markdown
 
 
+def test_a_youtube_watch_page_yields_its_title_channel_and_description(youtube_watch_page):
+    html = youtube_watch_page("Strukturen erkennen.\nMuster finden.")
+    result = convert_document(html.encode(), "text/html; charset=utf-8", "https://www.youtube.com/watch?v=VhCv6MlgWlE")
+    assert result.markdown.startswith("# Mathematik ist überall")
+    assert "Mathe Kanal" in result.markdown and "Muster finden." in result.markdown
+    assert "Urheberrecht" not in result.markdown
+
+
 def test_media_skip_is_explicit():
     result = convert_document(b"media", "video/mp4", media_conversion_policy="skip")
     assert result.status == "skipped"

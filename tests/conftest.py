@@ -1,4 +1,5 @@
 import ipaddress
+import json
 import socket
 
 import pytest
@@ -40,3 +41,26 @@ def article_html():
         "<html><head><title>Optics</title></head><body><nav>NAVIGATIONTOKEN</nav>"
         "<main><h1>Optics</h1>" + paragraphs + "</main></body></html>"
     )
+
+
+@pytest.fixture
+def youtube_watch_page():
+    """A YouTube watch page as plain HTTP receives it: footer text, the video's data in a script."""
+
+    def page(description):
+        player = {
+            "videoDetails": {
+                "videoId": "VhCv6MlgWlE",
+                "title": "Mathematik ist überall",
+                "author": "Mathe Kanal",
+                "shortDescription": description,
+            }
+        }
+        return (
+            "<html><head><title>Mathematik ist überall - YouTube</title></head><body>"
+            '<div id="footer">Info Presse Urheberrecht Kontakt</div>'
+            "<script>var ytInitialPlayerResponse = " + json.dumps(player) + ";var meta = 1;</script>"
+            '<script src="/s/player/base.js"></script></body></html>'
+        )
+
+    return page

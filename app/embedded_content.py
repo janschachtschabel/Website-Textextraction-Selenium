@@ -1,8 +1,9 @@
-"""Embedded article bodies and the existing KMap lesson format."""
+"""Content a page carries as data: article bodies, KMap lessons and YouTube's video details."""
 
 import json
+import re
 from html import escape
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 
@@ -46,8 +47,46 @@ def _attachment_sections(node, fragment, soup, url) -> str:
     return "".join(f"<h2>{heading}</h2><ul>{''.join(items)}</ul>" for heading, items in sections.items())
 
 
+_YOUTUBE_PLAYER = re.compile(r"\bytInitialPlayerResponse\s*=\s*")
+
+
+def youtube_video(soup: BeautifulSoup) -> str | None:
+    """A YouTube watch page's title, channel and description, from the player data it embeds.
+
+    Plain HTTP gets only the page's footer as text, and a fresh browser in the EU meets a consent
+    page, but the watch page carries the video's text in ytInitialPlayerResponse.
+    """
+    for script in soup.find_all("script", src=False):
+        text = script.string or ""
+        match = _YOUTUBE_PLAYER.search(text)
+        if not match:
+            continue
+        try:
+            player, _ = json.JSONDecoder().raw_decode(text, match.end())
+        except ValueError:
+            return None
+        details = player.get("videoDetails") if isinstance(player, dict) else None
+        title = details.get("title") if isinstance(details, dict) else None
+        if not isinstance(title, str) or not title.strip():
+            return None
+        parts = [f"<h1>{escape(title)}</h1>"]
+        author = details.get("author")
+        if isinstance(author, str) and author.strip():
+            parts.append(f"<p>{escape(author)}</p>")
+        description = details.get("shortDescription")
+        if isinstance(description, str):
+            parts += [f"<p>{escape(line)}</p>" for line in description.splitlines() if line.strip()]
+        return "".join(parts)
+    return None
+
+
 def embedded_html(soup: BeautifulSoup, url: str | None) -> str | None:
     """Use articleBody, never a generic SEO description as a full document."""
+    host = (urlsplit(url or "").hostname or "").lower()
+    if host == "youtube.com" or host.endswith(".youtube.com"):
+        video = youtube_video(soup)
+        if video:
+            return video
     for script in soup.select(
         'script[type="json"], script[type="application/json"], script[type="application/ld+json"]'
     ):
