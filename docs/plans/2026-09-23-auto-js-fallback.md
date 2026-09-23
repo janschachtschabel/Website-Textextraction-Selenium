@@ -136,18 +136,21 @@ the branch's code mounted. "Usable" means a success with at least 60 words.
 
 - **auto**: 63 usable answers instead of 53 on 3.1.0. Rescued: OERSI (twillo, doi.org), memucho,
   the WLO and Schulcampus RLP edu-sharing render pages, PhET's lists, Siemens Stiftung, Walter
-  Fendt's apps, YouTube. One page lost words: kindOERgarten, 57 instead of 70.
+  Fendt's apps, YouTube. One page lost words: kindOERgarten, 57 instead of 70 - Trafilatura
+  dropped its worksheet list; see [2026-09-23-document-links.md](2026-09-23-document-links.md).
 - **What the run found and fixed**, each test first: Fobizz failed on every page with 502,
   because the egress guard named port 80 in Host and the site redirected to
   https://app.fobizz.com:80/; Siemens Stiftung failed with 502 on "Content-Encoding: (with ";
   YouTube, the second largest source, gave its footer over HTTP and Google's consent page in
   Chrome - its title, channel and description now come from the data the watch page embeds,
   and auto keeps a page that carries its content as data on HTTP.
-- **The 31 answers that stay weak**, by cause: 11 pages with little text of their own (podcast
-  and video pages, apps and simulations, a KMap exercise built in shadow roots); 9 dead links in
-  WLO's index (404s, a deleted domain, two Fobizz materials redirected to the gallery, two
-  RPI-Virtuell pages whose firewall answered the crawler with 403 and a browser with 404 - live
-  RPI-Virtuell pages answer the crawler); 7 refused the service's crawler user agent and served
+- **The 31 answers that stay weak**, by cause: 9 pages with little text of their own (a video
+  with a short description, Planet-N modules, a Java applet and a chemistry app, edu-sharing
+  pages, a KMap exercise route that shows only a placeholder, a kindOERgarten post); 11 dead
+  links in WLO's index (404s, a deleted domain, two Fobizz materials redirected to the gallery,
+  two BR podcast episodes redirected to the series page, two RPI-Virtuell pages whose firewall
+  answered the crawler with 403 and a browser with 404 - live RPI-Virtuell pages answer the
+  crawler); 7 refused the service's crawler user agent and served
   a browser one (DiLerTube's 423, OER Commons' 403, LEIFI's Cloudflare challenge, which Chrome
   passes with a browser user agent); 1 Globales Lernen page refused both; 2 Digital Learning Lab
   pages did not answer on port 443 from the test network; 1 video file, skipped by the media
@@ -174,7 +177,8 @@ the branch's code mounted. "Usable" means a success with at least 60 words.
 - The default user agent. It names the service as a crawler with a contact URL; an operator
   who sets a browser user agent decides that for their deployment.
 - Reading content that exists only in shadow roots into the extraction (serializing them
-  with `getHTML`); KMap's lesson reaches the extraction through its embedded payload.
+  with `getHTML`); KMap's lesson reaches the extraction through its embedded payload. The KMap
+  exercise of the run shows only a placeholder, so no page needed it.
 - Network-idle readiness for `speed`; auto no longer uses it by default.
 - `success: true` for a fast-mode answer that is only the page title.
 
@@ -208,5 +212,5 @@ the branch's code mounted. "Usable" means a success with at least 60 words.
 | Risk | Mitigation |
 |---|---|
 | More auto requests render, each taking seconds and a browser slot | only pages under 500 visible characters that run JavaScript; measured on 18 real pages |
-| A rendered answer is worse than the HTTP one | not seen on any routed page; the threshold keeps LearningApps and KMap on HTTP |
+| A rendered answer is worse than the HTTP one | the threshold keeps LearningApps and KMap on HTTP; the source run found three pages with fewer words rendered, see [2026-09-23-document-links.md](2026-09-23-document-links.md) |
 | Walking shadow roots on every poll costs time | only while the light DOM shows no text, which pages with text never reach |

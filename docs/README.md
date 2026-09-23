@@ -40,6 +40,8 @@ Two kinds of entry are worth knowing about before reading them:
   the plan for anonymization and media metadata in the published image (3.1.0).
 - [plans/2026-09-23-auto-js-fallback.md](plans/2026-09-23-auto-js-fallback.md) - the plan for
   auto's fallback to Chrome, the waits, and the run over WLO's largest sources (3.2.0).
+- [plans/2026-09-23-document-links.md](plans/2026-09-23-document-links.md) - why the text keeps
+  the files a page's content links to, and what the open points of that run turned out to be.
 
 ## Where the other answers live
 
