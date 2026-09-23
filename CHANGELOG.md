@@ -3,7 +3,11 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
-## Unreleased
+## 3.2.1 - 2026-09-23
+
+The files a page's content links to stay in its text: on 6 of the 94 pages of the 3.2.0 source
+run the text had lost them, and `auto` now answers 64 of those pages usefully instead of 63.
+One malformed link no longer fails a whole page.
 
 ### Fixed - the files a page is about stay in its text
 

@@ -16,7 +16,8 @@ while the job runs, and a restart no longer loses the finished ones. A client th
 says how. 3.1 anonymizes and reads audio and video metadata in the published image, and
 `/docs` names for every option its default, its range and what it does. 3.2 renders a page in
 `auto` mode whenever its plain HTML yields too little text, waits for content a page loads after
-itself, and reads a YouTube video's title and description.
+itself, and reads a YouTube video's title and description; 3.2.1 keeps the files a page's
+content links to in its text.
 Along the way: 0.9 kept a page's mathematics, turning presentation MathML into LaTeX and
 no longer dropping formulas a page hides from sighted readers, and stopped worker teardown
 from blocking the event loop; 0.8 added Python 3.14 support, full-page screenshots and
