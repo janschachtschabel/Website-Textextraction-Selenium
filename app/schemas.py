@@ -162,8 +162,9 @@ class CrawlOptions(BaseModel):
         None,
         description="How the page is fetched. fast reads the HTTP response only; js always renders the "
         "page in Chrome; auto reads the HTTP response and renders in Chrome when that fails: fewer than "
-        "500 visible characters extracted from a page that runs JavaScript, or a bot challenge such as "
-        '"Just a moment...". fetch_engine in the answer says which ran. Default: DEFAULT_MODE, auto',
+        "500 visible characters extracted from a page that runs JavaScript - a bot challenge such as "
+        '"Just a moment..." counts even with an error status. fetch_engine in the answer says which '
+        "ran. Default: DEFAULT_MODE, auto",
     )
     js_strategy: Literal["accuracy", "speed"] | None = Field(
         None,
@@ -231,8 +232,9 @@ class CrawlOptions(BaseModel):
     )
     js_auto_wait: bool | None = Field(
         None,
-        description="In Chrome, wait until the page stops changing: its text still, no aria-busy or "
-        'spinning progress bar left, mathematics typeset. Before that, a bot challenge such as "Just a '
+        description="In Chrome, wait until the page stops changing: its text still, no data or script "
+        "request of the page running (for up to 5 s), no aria-busy or spinning progress bar left, "
+        'mathematics typeset. Before that, a bot challenge such as "Just a '
         'moment..." gets up to 10 s to let the browser through. The wait gives up after 10 s (speed) or 20 s '
         "(accuracy), counted once the selectors and the minimum wait are met, and the answer is then "
         "marked incomplete and not a success. Without it, a selector or wait_for_ms, the page is read "

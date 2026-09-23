@@ -301,8 +301,14 @@ curl http://127.0.0.1:8000/crawl \
 | `js` | Render with Selenium using a fresh profile |
 
 A short useful page is a success. A cookie/privacy phrase or RSS discovery link
-alone does not trigger Selenium. HTTP errors and detected challenge pages do not
-trigger attempts to bypass the block. PDF, Office and feed bodies use document
+alone does not trigger Selenium. HTTP errors stay on HTTP, except a bot challenge
+such as "Just a moment...": auto renders it, and Chrome gives it up to 10 s to let
+the browser through. The browser is not disguised, so whether it gets in stays the
+site's decision; a block page such as Cloudflare's "Attention Required!" is not
+rendered at all. A page that carries its content as data - an article body in
+JSON-LD, a KMap lesson, a YouTube video's title, channel and description - is read
+from that data and not rendered; YouTube shows a fresh browser in the EU its
+consent page instead. PDF, Office and feed bodies use document
 conversion rather than browser routing. With `mode=js`, Chrome downloads such
 files instead of rendering them: the result has no text and a warning. Formulas
 appear as `$$...$$`: a page's own TeX when it publishes one, otherwise its
@@ -442,7 +448,8 @@ it can be pasted into an editor that only understands that form.
   with `accuracy` unless the request names a strategy: it renders only pages whose
   content arrives after the page itself, which `speed` reads too early.
 - `wait_for_selectors`: wait until all CSS selectors match visible elements.
-  Content stability, busy indicators (`aria-busy`, visible progress bars without a
+  Content stability, running XHR, fetch and script requests of the page (awaited
+  for at most 5 s), busy indicators (`aria-busy`, visible progress bars without a
   value) and MathJax readiness replace fixed sleeps.
   `wait_for_ms` is an optional minimum wait within the same deadline.
 - `js_auto_wait=true` first gives a bot challenge such as "Just a moment..." up

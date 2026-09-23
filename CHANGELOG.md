@@ -14,19 +14,39 @@ Measured on 2026-09-23: the edu-sharing search gave 1 word instead of 42, Duolin
 of 170, Khan Academy 35 instead of 2575.
 
 - auto renders when the HTTP extraction has fewer than 500 visible characters and the page
-  runs JavaScript - a script with a source or an inline one; JSON-LD and other data blocks do
-  not count - and when the answer is a bot challenge such as "Just a moment...", whatever its
-  status. Other error answers stay on HTTP.
+  runs JavaScript - a script of a JavaScript type, with a source or inline; JSON-LD and other
+  data blocks do not count. A bot challenge such as "Just a moment..." qualifies even with an
+  error status; other error answers stay on HTTP, and so does Cloudflare's "Attention
+  Required!" block page, which lets no browser through.
 - Pages with more text stay on HTTP, among them KMap lessons, whose content the service reads
   from their data block although their body shows nothing.
 - The result cache moves to `extraction-v5`, so stored thin answers are not served again.
+
+### Added - YouTube videos yield their text
+
+YouTube is the second largest source in WLO, with 54,338 materials. Plain HTTP read only a watch
+page's footer, 26 words, and `mode=js` met Google's consent page in the EU: 207 words of cookie
+text. A watch page's title, channel and description now come from the data the page embeds, over
+plain HTTP; two real videos gave 54 and 168 words in about a second. auto keeps every page whose
+content the HTTP path reads from such data on HTTP - a YouTube video, a KMap lesson.
+
+### Fixed - pages that failed to download
+
+- The egress guard named port 80 in the Host header of a forwarded plain-HTTP request.
+  app.fobizz.com built its redirect from it, https://app.fobizz.com:80/gallery, and every Fobizz
+  material failed with 502 "HTTP download failed", with and without Chrome. The port is named only
+  when it is not 80.
+- A body with an unknown content coding is read as the plain body, as browsers do:
+  medienportal.siemens-stiftung.org sends "Content-Encoding: (with " over plain HTML and failed
+  with 502. Codings the service cannot decode - br, zstd, compress - are still refused; x-gzip is
+  gzip.
 
 ### Changed - auto renders with accuracy
 
 auto renders with `js_strategy=accuracy` unless the request names a strategy;
 `DEFAULT_JS_STRATEGY` applies to `mode=js`. auto renders only pages whose content arrives after
-the page itself, and `speed` reads them too early: PhET gave 25 words instead of 419,
-diagrams.net 62 instead of 1983.
+the page itself, and `speed`, which reads once the document is parsed, missed it: PhET gave 24
+words instead of 419, diagrams.net 62 instead of 1983.
 
 ### Fixed - Chrome waits for bot challenges and sees web components
 
@@ -34,9 +54,16 @@ diagrams.net 62 instead of 1983.
   with either strategy, instead of returning the challenge at once. Whether the site lets the
   browser in stays its decision: leifiphysik.de let Chrome through with a browser user agent,
   but not with the service's default one, which names it as a crawler.
-- The wait for settled content also reads text in open shadow roots when the page shows none
-  outside them. KMap lessons, built from web components, settled only at the 10 or 20 s limit
-  and were then no success.
+- The wait for settled content also reads text in open shadow roots, when the region it
+  awaits shows none outside them. KMap lessons, built from web components, settled only at the
+  10 or 20 s limit and were then no success.
+- Settled content also wants the page's XHR, fetch and script requests done, for at most 5 s
+  after the wait began; a page that polls or keeps a connection open settles as before, later.
+  PhET's list arrived with the last of five XHR requests 2.2 s after its page load, and every
+  mode missed it in some runs; now all nine runs got its 419 words. diagrams.net builds its app
+  from scripts it loads after the document: `speed` now reads its 1983 words instead of the 62
+  of its landing text. Pages that keep loading scripts take up to 5 s longer - ZDF 7.4 s
+  instead of 4.5 s with `speed`, for the same text.
 
 ## 3.1.0 - 2026-09-23
 
