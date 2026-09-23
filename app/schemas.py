@@ -161,16 +161,17 @@ class CrawlOptions(BaseModel):
     mode: Literal["fast", "js", "auto"] | None = Field(
         None,
         description="How the page is fetched. fast reads the HTTP response only; js always renders the "
-        "page in Chrome; auto reads the HTTP response and renders in Chrome only when that yields a "
-        "script-built shell: under 1000 characters of text with an app root such as #root, or a page "
-        "asking for JavaScript. fetch_engine in the answer says which ran. Default: DEFAULT_MODE, auto",
+        "page in Chrome; auto reads the HTTP response and renders in Chrome when that fails: fewer than "
+        "500 visible characters extracted from a page that runs JavaScript, or a bot challenge such as "
+        '"Just a moment...". fetch_engine in the answer says which ran. Default: DEFAULT_MODE, auto',
     )
     js_strategy: Literal["accuracy", "speed"] | None = Field(
         None,
         description="How Chrome loads the page. accuracy waits for the full page load; speed reads it once "
         "the document is parsed and blocks image, font and media files by extension unless a screenshot "
         "is taken. With js_auto_wait, speed wants 0.3 s of still text instead of 1 s and gives up after "
-        "10 s instead of 20 s. Default: DEFAULT_JS_STRATEGY, speed",
+        "10 s instead of 20 s. Default: DEFAULT_JS_STRATEGY, speed - except that auto renders with "
+        "accuracy, since it renders only pages whose content arrives after the page itself",
     )
     timeout_ms: int | None = Field(
         None,
@@ -231,7 +232,8 @@ class CrawlOptions(BaseModel):
     js_auto_wait: bool | None = Field(
         None,
         description="In Chrome, wait until the page stops changing: its text still, no aria-busy or "
-        "spinning progress bar left, mathematics typeset. It gives up after 10 s (speed) or 20 s "
+        'spinning progress bar left, mathematics typeset. Before that, a bot challenge such as "Just a '
+        'moment..." gets up to 10 s to let the browser through. The wait gives up after 10 s (speed) or 20 s '
         "(accuracy), counted once the selectors and the minimum wait are met, and the answer is then "
         "marked incomplete and not a success. Without it, a selector or wait_for_ms, the page is read "
         "as soon as it has loaded. Default: DEFAULT_JS_AUTO_WAIT, true",
@@ -473,7 +475,8 @@ class CrawlResponse(BaseModel):
     )
     fetch_engine: Literal["http", "selenium"] = Field(
         description="What produced the page: http for the plain response, selenium when Chrome rendered it "
-        "- in auto mode only when the plain HTML was a script-built shell"
+        "- in auto mode only when the HTTP extraction failed: too little text from a page that runs "
+        "JavaScript, or a bot challenge"
     )
     converter: str | None = Field(
         None,

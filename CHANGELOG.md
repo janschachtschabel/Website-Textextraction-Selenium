@@ -3,6 +3,41 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## Unreleased
+
+### Fixed - auto renders the pages the plain HTML does not give
+
+auto read JavaScript pages over HTTP and answered `success: true` with their title, a loader
+image or a notice for browsers without JavaScript, without starting Chrome: it rendered only
+when the extraction was empty or literally "loading" and the page had one of four app roots.
+Measured on 2026-09-23: the edu-sharing search gave 1 word instead of 42, Duolingo 1 instead
+of 170, Khan Academy 35 instead of 2575.
+
+- auto renders when the HTTP extraction has fewer than 500 visible characters and the page
+  runs JavaScript - a script with a source or an inline one; JSON-LD and other data blocks do
+  not count - and when the answer is a bot challenge such as "Just a moment...", whatever its
+  status. Other error answers stay on HTTP.
+- Pages with more text stay on HTTP, among them KMap lessons, whose content the service reads
+  from their data block although their body shows nothing.
+- The result cache moves to `extraction-v5`, so stored thin answers are not served again.
+
+### Changed - auto renders with accuracy
+
+auto renders with `js_strategy=accuracy` unless the request names a strategy;
+`DEFAULT_JS_STRATEGY` applies to `mode=js`. auto renders only pages whose content arrives after
+the page itself, and `speed` reads them too early: PhET gave 25 words instead of 419,
+diagrams.net 62 instead of 1983.
+
+### Fixed - Chrome waits for bot challenges and sees web components
+
+- While a page shows a bot challenge, Chrome gives it up to 10 s to let the browser through,
+  with either strategy, instead of returning the challenge at once. Whether the site lets the
+  browser in stays its decision: leifiphysik.de let Chrome through with a browser user agent,
+  but not with the service's default one, which names it as a crawler.
+- The wait for settled content also reads text in open shadow roots when the page shows none
+  outside them. KMap lessons, built from web components, settled only at the 10 or 20 s limit
+  and were then no success.
+
 ## 3.1.0 - 2026-09-23
 
 ### Added - the image anonymizes and reads media metadata

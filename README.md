@@ -297,7 +297,7 @@ curl http://127.0.0.1:8000/crawl \
 | Mode | Behavior |
 |---|---|
 | `fast` | Stream HTTP response and convert it; no browser |
-| `auto` | Try HTTP and extraction first; render an empty or JS-dependent app shell |
+| `auto` | Try HTTP and extraction first; render in Chrome when that yields fewer than 500 visible characters from a page that runs JavaScript, or a bot challenge |
 | `js` | Render with Selenium using a fresh profile |
 
 A short useful page is a success. A cookie/privacy phrase or RSS discovery link
@@ -438,12 +438,17 @@ it can be pasted into an editor that only understands that form.
   Compressed HTTP input is decoded with a bounded output allocation. For Chrome,
   this bounds returned HTML, **not total bytes of all browser assets**.
 - `js_strategy=speed`: eager navigation; blocks common image/font/media URLs unless
-  a screenshot is requested. `accuracy` waits for normal page load.
+  a screenshot is requested. `accuracy` waits for normal page load. `auto` renders
+  with `accuracy` unless the request names a strategy: it renders only pages whose
+  content arrives after the page itself, which `speed` reads too early.
 - `wait_for_selectors`: wait until all CSS selectors match visible elements.
   Content stability, busy indicators (`aria-busy`, visible progress bars without a
   value) and MathJax readiness replace fixed sleeps.
   `wait_for_ms` is an optional minimum wait within the same deadline.
-- `js_auto_wait=true` waits for that readiness for at most 10 s (`speed`) or
+- `js_auto_wait=true` first gives a bot challenge such as "Just a moment..." up
+  to 10 s to let the browser through; whether the site does stays its decision.
+  Text in open shadow roots (web components) counts once the rest of the page
+  shows none. It waits for that readiness for at most 10 s (`speed`) or
   20 s (`accuracy`) once the selectors and `wait_for_ms` are satisfied; those two
   still apply until the deadline. Pages that never settle (a permanent spinner,
   a denied download) are then returned in their current state with a warning

@@ -110,7 +110,7 @@ Each of these is what a request gets when it does not say otherwise.
 
 | Setting | Default | What it does |
 |---|---|---|
-| `DEFAULT_MODE` | `auto` | `fast` never starts a browser, `js` always does, `auto` starts one only when the plain HTML yields too little text. |
+| `DEFAULT_MODE` | `auto` | `fast` never starts a browser, `js` always does, `auto` starts one only when the plain HTML yields too little text - fewer than 500 visible characters from a page that runs JavaScript - or a bot challenge. |
 | `DEFAULT_TIMEOUT_SECONDS` | `120` | Deadline for one URL, including retries and cleanup. |
 | `DEFAULT_RETRIES` | `1` | Retries after a transient failure. Certificate and policy errors are never retried. |
 | `DEFAULT_MAX_BYTES` | `10485760` | Largest response body read per URL, after decompression. |
@@ -118,8 +118,8 @@ Each of these is what a request gets when it does not say otherwise.
 | `DEFAULT_ACCEPT_LANGUAGE` | *(empty)* | `Accept-Language` for every crawl; empty sends none. Example: `de,en;q=0.8`. |
 | `RESPECT_ROBOTS_TXT` | `false` | Check robots.txt before each crawl (RFC 9309). |
 | `DEFAULT_HEADLESS` | `true` | Run Chrome headless. |
-| `DEFAULT_JS_STRATEGY` | `speed` | `speed` also drops images, fonts and media, which it can only do when no screenshot is wanted. `accuracy` loads everything. |
-| `DEFAULT_JS_AUTO_WAIT` | `true` | Wait for the page to settle rather than returning at load. |
+| `DEFAULT_JS_STRATEGY` | `speed` | `speed` also drops images, fonts and media, which it can only do when no screenshot is wanted. `accuracy` loads everything. Applies to `mode=js`: `auto` renders with `accuracy` unless a request names a strategy. |
+| `DEFAULT_JS_AUTO_WAIT` | `true` | Wait for the page to settle rather than returning at load, and give a bot challenge up to 10 s to let the browser through. |
 | `HTML_CONVERTER` | `trafilatura` | First converter to try: `trafilatura`, `markitdown` or `bs4`. The others follow as fallbacks. |
 | `TRAFILATURA_CLEAN_MARKDOWN` | `true` | Extract the main content as Markdown. `false` returns the whole page as plain text. |
 | `MEDIA_CONVERSION_POLICY` | `skip` | `skip`/`none` ignore audio and video, `metadata` reads their tags with `ffprobe`, which the published image carries. `full` is not implemented and is refused as unsupported. |

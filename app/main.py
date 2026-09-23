@@ -51,7 +51,8 @@ falls back to the operator's default, so the example on that endpoint is a compl
 request, not a template to fill in.
 
 **Choosing an engine.** `mode=fast` never starts a browser, `mode=js` always does, and
-`mode=auto` starts one only when the plain HTML yields too little text. A screenshot needs
+`mode=auto` starts one only when the plain HTML yields too little text or a bot challenge,
+and then renders with `js_strategy=accuracy` unless the request names one. A screenshot needs
 the browser.
 
 **Several URLs.** `POST /crawl/batch` takes as many as the operator allows - 50 unless
