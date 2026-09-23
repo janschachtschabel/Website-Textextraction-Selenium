@@ -27,6 +27,11 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+def _row_key(job_id: str, seq: int) -> str:
+    """Rows are numbered from 0 in the order their URLs finished."""
+    return f"{KEY}{job_id}:row:{seq}"
+
+
 class JobRunner:
     def __init__(self, resources):
         self.resources = resources
@@ -62,6 +67,30 @@ class JobRunner:
         if record and record["status"] in UNFINISHED and time.time() > record["deadline_at"] + LOST_AFTER_SECONDS:
             return {**record, "status": "failed", "error": "Job lost: the process that ran it stopped"}
         return record
+
+    async def rows(self, job_id: str, offset: int, limit: int) -> tuple[dict | None, list[dict]]:
+        """The job's record, then up to limit of its rows from offset on.
+
+        The record is read first. A job is marked done or failed only after its last row is
+        written, so the rows read after a record that says so are complete, and an empty
+        page then means the end. The page stops at the first row that does not exist rather
+        than at the record's count: that is saved at most every PROGRESS_EVERY_SECONDS, and
+        after a crash it trails the rows for good."""
+        record = await self.status(job_id)
+        if record is None:
+            return None, []
+        state = self.resources.state
+
+        def read():
+            page = []
+            for seq in range(offset, offset + limit):
+                row = state.get(_row_key(job_id, seq))
+                if row is None:
+                    break
+                page.append(row)
+            return page
+
+        return record, await self.resources.io(read)
 
     async def close(self):
         """Cancel running jobs and record why; a job cancelled before it started never ran its handler."""

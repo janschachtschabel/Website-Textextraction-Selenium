@@ -10,7 +10,7 @@ import secrets
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import Body, FastAPI, HTTPException, Path, Security
+from fastapi import Body, FastAPI, HTTPException, Path, Query, Security
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBasic, HTTPBasicCredentials, HTTPBearer
@@ -35,6 +35,7 @@ from .schemas import (
     CrawlRequest,
     CrawlResponse,
     JobAccepted,
+    JobResults,
     JobStatus,
     resolve_options,
 )
@@ -323,6 +324,35 @@ def _job_routes(application, config, admit, check_auth):
         # since, and the store outlives an upgrade.
         fields = {name: record.get(name) for name in JobStatus.model_fields if name != "job_id"}
         return JobStatus(job_id=job_id, **fields)
+
+    @application.get(
+        "/jobs/{job_id}/results",
+        response_model=JobResults,
+        dependencies=[Security(check_auth)],
+        summary="Read a job's results as they finish",
+    )
+    async def job_results(
+        job_id: JobId,
+        offset: int = Query(0, ge=0, description="Rows already read: the previous page's next_offset"),
+        limit: int = Query(20, ge=1, le=100, description="Rows in this page"),
+    ):
+        """Page through the URLs a job has finished, while it runs and after.
+
+        Rows come in the order the URLs finished; `position` names the URL of the request.
+        Start at `offset=0` and pass each page's `next_offset` on. An empty page from a job
+        that is still running means nothing new yet; from one that has ended, nothing more.
+        A page holds at most `limit` results of up to `max_bytes` each. Answers 404 when
+        the id is unknown or its record has expired."""
+        record, rows = await application.state.resources.jobs.rows(job_id, offset, limit)
+        if record is None:
+            raise HTTPException(404, "Unknown or expired job")
+        return JobResults(
+            job_id=job_id,
+            status=record["status"],
+            progress=record.get("progress"),
+            results=rows,
+            next_offset=offset + len(rows),
+        )
 
 
 def create_app(config=settings, resources=None):

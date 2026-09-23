@@ -142,6 +142,14 @@ JOB_STATUS_EXAMPLE = {
     "error": None,
 }
 
+JOB_RESULTS_EXAMPLE = {
+    "job_id": JOB_EXAMPLE["job_id"],
+    "status": "running",
+    "progress": {"done": 1, "succeeded": 1, "total": 2},
+    "results": [{"position": 0, **ITEM_EXAMPLE}],
+    "next_offset": 1,
+}
+
 
 class CrawlOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
@@ -418,3 +426,23 @@ class JobStatus(BaseModel):
     progress: JobProgress | None = Field(None, description="How many URLs are done, while the job runs and after")
     result: BatchCrawlResponse | None = Field(None, description="The batch result, present once the job is done")
     error: str | None = Field(None, description="Why the job failed, absent otherwise")
+
+
+class JobResultRow(BatchCrawlItemResult):
+    model_config = ConfigDict(json_schema_extra={"examples": [{"position": 0, **ITEM_EXAMPLE}]})
+    position: int = Field(description="Index of this URL in the list the job was given")
+
+
+class JobResults(BaseModel):
+    """URLs a job has finished, in the order they finished - which is not the order they
+    were submitted in; each row's position says which URL of the request it was."""
+
+    model_config = ConfigDict(json_schema_extra={"examples": [JOB_RESULTS_EXAMPLE]})
+    job_id: str = Field(description="Identifier of the job")
+    status: Literal["queued", "running", "done", "failed"] = Field(description="Where the job stands")
+    progress: JobProgress | None = Field(None, description="How many URLs are done")
+    results: list[JobResultRow] = Field(description="Rows from offset on, at most limit of them")
+    next_offset: int = Field(
+        description="The offset for the next page. An empty page from a job that is no longer "
+        "queued or running means there is nothing more to read"
+    )

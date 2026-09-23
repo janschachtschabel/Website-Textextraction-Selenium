@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from app.config import settings
+from app.jobs import KEY, _row_key
 from app.main import create_app
 from app.resources import STORAGE_LAYOUT, Resources
 
@@ -59,6 +60,26 @@ async def finished(client, status_url, seconds=20):
     pytest.fail("The job did not finish")
 
 
+def store_rows(resources, job_id, count, done=None):
+    """A running job's record and its first count rows, as the runner leaves them: numbered
+    as they finished, each naming its URL's place in the request."""
+    resources.state.set(
+        KEY + job_id,
+        {
+            "status": "running",
+            "progress": {"done": count if done is None else done, "succeeded": 0, "total": 5},
+            "submitted_at": "2026-09-23T08:00:00+00:00",
+            "deadline_at": time.time() + 600,
+            "finished_at": None,
+            "error": None,
+        },
+    )
+    for seq in range(count):
+        position = 4 - seq
+        row = {"position": position, "url": f"https://example.com/{position}", "success": False, "error": "x"}
+        resources.state.set(_row_key(job_id, seq), row)
+
+
 def saves(monkeypatch, jobs):
     """Every record the runner writes, as (status, progress). A poll cannot see writes the
     throttle swallowed, so anything about how often it writes is asserted from here."""
@@ -93,12 +114,51 @@ async def test_unknown_jobs_answer_404(jobs_api):
         assert response.status_code == 404 and response.json()["detail"] == "Unknown or expired job"
 
 
-@pytest.mark.parametrize("path", ["/jobs/abc:row:0"])
+@pytest.mark.parametrize("path", ["/jobs/abc:row:0", "/jobs/abc:row:0/results"])
 async def test_a_job_id_is_only_what_the_service_hands_out(jobs_api, path):
     """The id becomes part of a store key. One with a colon could name a key that is not a
     job record - a result row, once rows exist - so it is refused at the door."""
     async with jobs_api() as (client, _):
         assert (await client.get(path)).status_code == 422
+
+
+async def test_results_are_paged_in_the_order_they_finished(jobs_api):
+    async with jobs_api() as (client, resources):
+        store_rows(resources, "paged", 5)
+        first = (await client.get("/jobs/paged/results?limit=2")).json()
+        rest = (await client.get(f"/jobs/paged/results?offset={first['next_offset']}&limit=10")).json()
+    assert [row["position"] for row in first["results"]] == [4, 3] and first["next_offset"] == 2
+    assert [row["position"] for row in rest["results"]] == [2, 1, 0] and rest["next_offset"] == 5
+    assert rest["status"] == "running" and rest["progress"]["total"] == 5
+
+
+async def test_an_empty_page_keeps_the_offset_so_the_next_poll_resumes_there(jobs_api):
+    async with jobs_api() as (client, resources):
+        store_rows(resources, "waiting", 2)
+        page = (await client.get("/jobs/waiting/results?offset=2")).json()
+    assert page["results"] == [] and page["next_offset"] == 2
+
+
+async def test_a_page_reads_every_row_written_although_the_saved_count_trails(jobs_api):
+    """The record's count is saved at most every PROGRESS_EVERY_SECONDS, and after a crash
+    it stays behind the rows for good. A page bounded by it would lose the difference."""
+    async with jobs_api() as (client, resources):
+        store_rows(resources, "trailing", 3, done=1)
+        page = (await client.get("/jobs/trailing/results")).json()
+    assert len(page["results"]) == 3
+
+
+async def test_results_of_an_unknown_job_answer_404(jobs_api):
+    async with jobs_api() as (client, _):
+        response = await client.get("/jobs/not-a-job/results")
+    assert response.status_code == 404 and response.json()["detail"] == "Unknown or expired job"
+
+
+@pytest.mark.parametrize("query", ["limit=0", "limit=101", "offset=-1"])
+async def test_a_page_outside_its_bounds_is_refused(jobs_api, query):
+    async with jobs_api() as (client, resources):
+        store_rows(resources, "bounded", 1)
+        assert (await client.get(f"/jobs/bounded/results?{query}")).status_code == 422
 
 
 async def test_active_jobs_are_bounded_per_process(jobs_api):
