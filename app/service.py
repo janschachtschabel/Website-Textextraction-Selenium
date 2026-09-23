@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from functools import partial
 from urllib.parse import urlsplit
 
 from loguru import logger
@@ -105,24 +106,48 @@ class CrawlService:
             elapsed_ms=round((time.monotonic() - started) * 1000),
         )
 
-    async def _batch_item(self, url, options, expires_at, semaphore, started):
+    async def stream_batch(self, urls, options, max_concurrency, deliver) -> None:
+        """Crawl like crawl_batch, but hand each item to deliver(position, item) as it
+        finishes instead of collecting it, so a job holds max_concurrency results at a time
+        rather than all of them. A delivery that fails fails the batch and cancels the URLs
+        still pending: their results would have nowhere to go."""
+        started = time.monotonic()
+        # All deadlines start at batch admission, including time behind max_concurrency.
+        expires_at = started + options.timeout_ms / 1000
+        semaphore = asyncio.Semaphore(max_concurrency)
+        try:
+            async with asyncio.TaskGroup() as group:
+                for position, url in enumerate(urls):
+                    handoff = partial(deliver, position)
+                    group.create_task(self._batch_item(url, options, expires_at, semaphore, started, handoff))
+        except ExceptionGroup as failed:
+            raise failed.exceptions[0] from failed
+
+    async def _batch_item(self, url, options, expires_at, semaphore, started, deliver=None):
         deadline = Deadline.at(expires_at)
         acquired = False
         try:
-            await deadline.run(semaphore.acquire())
-            acquired = True
-            result = await self.crawl(url, options, deadline)
-            return BatchCrawlItemResult(
-                url=url,
-                success=result.success,
-                result=result,
-                error=None if result.success else failure_reason(result),
-            )
-        except CrawlError as exc:
-            if not acquired:
-                # crawl() records the attempt itself; a queue failure never reaches it.
-                await self._record(time.monotonic() - started, False)
-            return BatchCrawlItemResult(url=url, success=False, error=str(exc))
+            try:
+                await deadline.run(semaphore.acquire())
+                acquired = True
+                result = await self.crawl(url, options, deadline)
+                item = BatchCrawlItemResult(
+                    url=url,
+                    success=result.success,
+                    result=result,
+                    error=None if result.success else failure_reason(result),
+                )
+            except CrawlError as exc:
+                if not acquired:
+                    # crawl() records the attempt itself; a queue failure never reaches it.
+                    await self._record(time.monotonic() - started, False)
+                item = BatchCrawlItemResult(url=url, success=False, error=str(exc))
+            if deliver is None:
+                return item
+            # Still inside the slot, so a slow result store holds the batch back instead of
+            # letting finished results pile up in memory behind it.
+            await deliver(item)
+            return None
         finally:
             if acquired:
                 semaphore.release()

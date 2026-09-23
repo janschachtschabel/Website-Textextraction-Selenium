@@ -277,6 +277,59 @@ async def test_batch_pipeline_runs_without_the_http_layer(api):
     assert state["peak"] <= 2
 
 
+async def test_a_streamed_batch_delivers_every_url_once_with_its_position(api):
+    from app.schemas import BatchCrawlRequest, resolve_options
+
+    _, _, resources = api
+    urls = ["https://example.com/a", "https://example.com/blocked", "https://example.com/a"]
+    options = resolve_options(BatchCrawlRequest(urls=urls), resources.config)
+    delivered = []
+
+    async def deliver(position, item):
+        delivered.append((position, item.url, item.success))
+
+    assert await resources.service.stream_batch(urls, options, 2, deliver) is None
+    assert sorted(delivered) == [(0, urls[0], True), (1, urls[1], False), (2, urls[2], True)]
+
+
+async def test_a_streamed_batch_delivers_inside_its_concurrency_slot(api):
+    """A slow result store has to hold the batch back. Delivered outside the slot, the next
+    URL would start while this one waits, and finished results would pile up in memory
+    behind a stalled store - the case streaming exists to prevent."""
+    from app.schemas import BatchCrawlRequest, resolve_options
+
+    _, state, resources = api
+    urls = [f"https://example.com/{n}" for n in range(3)]
+    options = resolve_options(BatchCrawlRequest(urls=urls), resources.config)
+    started = []
+
+    async def deliver(position, item):
+        before = state["calls"]
+        await asyncio.sleep(0.1)
+        started.append(state["calls"] - before)
+
+    await resources.service.stream_batch(urls, options, 1, deliver)
+    assert started == [0, 0, 0], f"crawls started while a result was being delivered: {started}"
+
+
+async def test_a_failing_delivery_fails_the_batch_and_stops_the_rest(api):
+    """A result with nowhere to go makes crawling on pointless. The caller must be able to
+    name what went wrong, so the original error comes out, not an ExceptionGroup."""
+    from app.schemas import BatchCrawlRequest, resolve_options
+
+    _, state, resources = api
+    urls = [f"https://example.com/{n}" for n in range(8)]
+    options = resolve_options(BatchCrawlRequest(urls=urls), resources.config)
+
+    async def deliver(position, item):
+        raise OSError("result store unavailable")
+
+    with pytest.raises(OSError, match="result store unavailable"):
+        await resources.service.stream_batch(urls, options, 1, deliver)
+    await asyncio.sleep(0.5)  # time enough for URLs nobody cancelled to be crawled anyway
+    assert state["calls"] <= 2, f"{state['calls']} of 8 URLs were crawled after the first result failed"
+
+
 async def test_both_worker_pools_use_the_configured_job_budget(api):
     _, _, resources = api
     assert resources.browser_pool.max_jobs == resources.conversion_pool.max_jobs == resources.config.worker_max_jobs
