@@ -3,6 +3,52 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## 3.1.0 - 2026-09-23
+
+### Added - the image anonymizes and reads media metadata
+
+Until now `anonymize=true` answered 503 in the published image and
+`media_conversion_policy=metadata` answered `failed`: the image carried neither the PII extra
+with a language model nor `ffprobe`.
+
+- The image carries Presidio with spaCy's `md` models for German and English. They are
+  dependencies of the `pii` extra, named by URL, and `requirements.lock` pins them by hash like
+  every other artefact; pip-compile started from the previous lock, so no version it held moved.
+- The image carries Debian's `ffmpeg`, for `ffprobe`.
+- It grows by 564 MB unpacked, from 1318 to 1881 MB: 376 MB of Python packages - spaCy 127,
+  the two models 115, phonenumbers 46 - and 187 MB for ffmpeg.
+- The first anonymized request in a conversion worker waits 10 to 40 seconds for its model;
+  later ones take about 0.4 seconds. A loaded model holds about 350 MiB in its worker.
+- The publish workflow's smoke test anonymizes in both languages and runs `ffprobe` before an
+  image can be pushed; against the 3.0.0 image it fails on both.
+
+### Changed - the default anonymization models are md
+
+`PRESIDIO_DE_MODEL` and `PRESIDIO_EN_MODEL` default to `de_core_news_md` and `en_core_web_md`,
+the models the `pii` extra now installs. `lg` recognizes a little more - named-entity F1 84.9
+and 85.5 against 83.8 and 84.7 - at ten times the size. **A deployment that installed `lg`
+keeps it by setting the variable**; without it, it now looks for `md`.
+
+### Fixed - the network policy
+
+- Deprecated site-local IPv6 addresses (`fec0::/10`) are denied. Python's `ipaddress` reports
+  them as global, so a host resolving there passed the check.
+- A `proxy` that does not resolve, or under the default policy resolves to a private address,
+  is refused with 400 `Proxy rejected: ...` before any connection. It answered 502
+  `HTTP download failed` after a connection attempt.
+- A rendered page whose final address is prohibited, because a redirect or a script moved it
+  there, is refused with 400 instead of being returned.
+- Tests pin the real policy on redirects: over HTTP, through the service and in Chrome.
+
+### Changed - /docs explains every endpoint and option
+
+- Every endpoint lists the errors it can answer, when, and the shape of their body. `/`,
+  `/health` and `/stats` document their fields, `/metrics` its Prometheus text.
+- Every request option names the setting that fills it, its shipped value, its range and what
+  it does; every answer field says what its values mean.
+- Two statements were wrong: `trafilatura_clean_markdown=false` returns plain text, and in
+  `auto` mode a screenshot is taken only when the page is rendered.
+
 ## 3.0.0 - 2026-09-23
 
 ### Changed - a job's results are read as they finish

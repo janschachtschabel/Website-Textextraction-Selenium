@@ -36,6 +36,8 @@ Two kinds of entry are worth knowing about before reading them:
   the first remediation was worked against.
 - [plans/2026-09-23-job-result-rows.md](plans/2026-09-23-job-result-rows.md) - the plan for
   storing each job result as a row (3.0.0), with the two decisions it rests on.
+- [plans/2026-09-23-image-anonymization-and-media.md](plans/2026-09-23-image-anonymization-and-media.md) -
+  the plan for anonymization and media metadata in the published image (3.1.0).
 
 ## Where the other answers live
 

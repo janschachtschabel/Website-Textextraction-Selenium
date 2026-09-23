@@ -13,7 +13,8 @@ this service without a checkout.
 3.0 stores a background job's results one URL at a time, as they finish: they can be read
 while the job runs, and a restart no longer loses the finished ones. A client that read
 `result` from `GET /jobs/{job_id}` has to change; [docs/migration-3.0.md](docs/migration-3.0.md)
-says how.
+says how. 3.1 anonymizes and reads audio and video metadata in the published image, and
+`/docs` names for every option its default, its range and what it does.
 Along the way: 0.9 kept a page's mathematics, turning presentation MathML into LaTeX and
 no longer dropping formulas a page hides from sighted readers, and stopped worker teardown
 from blocking the event loop; 0.8 added Python 3.14 support, full-page screenshots and
