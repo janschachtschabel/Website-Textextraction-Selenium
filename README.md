@@ -497,8 +497,9 @@ mapped private addresses are denied by default. Keep `SSRF_PROTECTION=true`.
 
 HTTP(S) upstream proxies are supported, including authentication. They must accept
 CONNECT requests to numeric destinations; this prevents a second target DNS lookup
-at the proxy. Private upstream proxies are also denied under the default network
-policy. SOCKS and arbitrary proxy protocols are rejected explicitly. TLS remains
+at the proxy. A `proxy` that does not resolve, or under the default policy resolves to
+a private address, is an API 400 before any connection, and every tunnel checks it
+again. SOCKS and arbitrary proxy protocols are rejected explicitly. TLS remains
 end-to-end. Keep network-level egress restrictions around production browser
 workers as an additional boundary for untrusted web content.
 

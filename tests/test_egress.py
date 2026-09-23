@@ -87,6 +87,30 @@ async def test_upstream_proxy_receives_pinned_destination_and_its_own_auth():
         await server.wait_closed()
 
 
+@pytest.mark.parametrize(
+    ("proxy", "reason"),
+    [
+        ("http://127.0.0.1:8767", "blocked by network policy"),
+        ("https://[::1]:3128", "blocked by network policy"),
+        ("http://alice:secret@internal-proxy.example:3128", "blocked by network policy"),
+        ("http://missing-proxy.example:3128", "unresolvable"),
+    ],
+)
+async def test_unusable_upstream_proxy_is_rejected_before_the_guard_starts(dns, proxy, reason):
+    dns["internal-proxy.example"] = "10.0.0.7"
+    with pytest.raises(CrawlError, match=f"^Proxy rejected: .*{reason}") as rejected:
+        async with EgressProxy(upstream=proxy):
+            pytest.fail("An unusable upstream proxy must not start a guard")
+    assert rejected.value.status_code == 400
+
+
+async def test_authenticated_public_proxy_and_policy_opt_out_start_the_guard(dns):
+    dns["proxy.example"] = "93.184.216.34"
+    for proxy, protection in [("http://alice:secret@proxy.example:3128", True), ("http://127.0.0.1:8767", False)]:
+        async with EgressProxy(protection=protection, upstream=proxy) as guard:
+            assert guard.url.startswith("http://127.0.0.1:")
+
+
 async def test_proxy_shutdown_does_not_hang_on_a_connection_that_never_detaches():
     # On Windows, CPython's proactor can skip Server._detach() after a reset connection
     # (a killed browser), so Server.wait_closed() would never return.

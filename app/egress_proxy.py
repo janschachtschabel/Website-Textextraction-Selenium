@@ -30,12 +30,21 @@ async def dial_target(target: Target, **kwargs):
     raise CrawlError("Destination connection failed") from last_error
 
 
-async def dial_upstream(target: Target, proxy: str, protection: bool):
+async def resolve_proxy(proxy: str, protection: bool) -> Target:
+    # Credentials go out as Proxy-Authorization; only the proxy's own address is checked.
     parsed = urlsplit(proxy)
     proxy_url = (
         f"{parsed.scheme}://{authority(parsed.hostname, parsed.port or (443 if parsed.scheme == 'https' else 80))}"
     )
-    proxy_target = await asyncio.to_thread(resolve_target, proxy_url, protection)
+    try:
+        return await asyncio.to_thread(resolve_target, proxy_url, protection)
+    except CrawlError as exc:
+        raise CrawlError(f"Proxy rejected: {exc}", 400) from exc
+
+
+async def dial_upstream(target: Target, proxy: str, protection: bool):
+    parsed = urlsplit(proxy)
+    proxy_target = await resolve_proxy(proxy, protection)
     tls = (
         {"ssl": ssl.create_default_context(), "server_hostname": proxy_target.host} if parsed.scheme == "https" else {}
     )
@@ -98,6 +107,9 @@ class EgressProxy:
         return f"http://127.0.0.1:{self.port}"
 
     async def __aenter__(self):
+        if self.upstream:
+            # An unusable proxy is the caller's 400 before any connection; every tunnel checks it again.
+            await resolve_proxy(self.upstream, self.protection)
         self.server = await asyncio.start_server(self._accept, "127.0.0.1", 0, limit=65536)
         return self
 

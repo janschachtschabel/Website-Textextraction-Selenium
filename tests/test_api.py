@@ -42,6 +42,7 @@ async def api(tmp_path, article_html):
         default_retries=0,
         api_key=None,
         host="127.0.0.1",
+        ssrf_protection=True,
     )
     resources = Resources(
         config, transport=httpx.MockTransport(upstream), validate=lambda url: None, browser=NoBrowser()
@@ -156,6 +157,28 @@ async def test_auto_uses_rendered_result_and_its_success_status(api):
     result = (await client.post("/crawl", json={"url": "https://example.com/shell"})).json()
     assert result["success"] and not result["error_page_detected"]
     assert result["fetch_engine"] == "selenium" and "Rendered lesson content" in result["markdown"]
+
+
+async def test_private_proxy_is_rejected_on_every_fetch_path(api):
+    from app.js_fetcher import BrowserFetcher
+
+    client, state, resources = api
+
+    class NoPool:
+        async def run(self, *args):
+            pytest.fail("A rejected proxy must not start Selenium")
+
+    resources.browser = BrowserFetcher(NoPool(), resources.rate, resources.config)
+    proxy = "http://127.0.0.1:8767"
+    detail = "Proxy rejected: Target blocked by network policy"
+    for mode in ("fast", "auto", "js"):
+        response = await client.post(
+            "/crawl", json={"url": "https://example.com/article", "mode": mode, "proxy": proxy}
+        )
+        assert (response.status_code, response.json()["detail"]) == (400, detail)
+    batch = await client.post("/crawl/batch", json={"urls": ["https://example.com/article"], "proxy": proxy})
+    assert batch.status_code == 200 and batch.json()["results"][0]["error"] == detail
+    assert state["calls"] == 0
 
 
 async def test_unsettled_rendered_page_is_returned_but_not_a_cached_success(api):
