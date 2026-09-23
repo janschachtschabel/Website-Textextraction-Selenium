@@ -12,7 +12,7 @@ from typing import Annotated
 
 from fastapi import Body, FastAPI, HTTPException, Path, Query, Security
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBasic, HTTPBasicCredentials, HTTPBearer
 from loguru import logger
 
@@ -41,6 +41,7 @@ from .schemas import (
     resolve_options,
 )
 from .selenium_driver import browser_status
+from .status_schemas import METRICS_EXAMPLE, Health, ServiceBanner, Stats
 
 DESCRIPTION = """Turns a web page into Markdown: fetched over HTTP, or rendered in Chrome
 when the page needs JavaScript to show its content.
@@ -170,7 +171,7 @@ def _admission(config):
 def _public_routes(application, config):
     """Reachable without a key, so a probe can identify the service and watch it."""
 
-    @application.get("/", summary="Service banner")
+    @application.get("/", summary="Service banner", response_model=ServiceBanner)
     async def root():
         """Name, version and the path to this documentation. Public, so a probe can identify
         the service without holding a key. The path is named even when the documentation
@@ -178,7 +179,10 @@ def _public_routes(application, config):
         return {"service": "Website Text Extraction", "version": __version__, "docs": "/docs"}
 
     @application.get(
-        "/health", summary="Liveness, capacity and browser presence", responses={503: {"description": STOPPING}}
+        "/health",
+        summary="Liveness, capacity and browser presence",
+        response_model=Health,
+        responses={503: {"model": Health, "description": STOPPING}},
     )
     async def health():
         """Public. Answers 200 while the service accepts work and 503 once it is stopping, and
@@ -206,7 +210,11 @@ def _observability_routes(application, check_auth):
     """The same counters twice: as JSON for a person, as text for Prometheus."""
 
     @application.get(
-        "/stats", dependencies=[Security(check_auth)], summary="Counters of the last hour", responses=answers(401)
+        "/stats",
+        dependencies=[Security(check_auth)],
+        summary="Counters of the last hour",
+        response_model=Stats,
+        responses=answers(401),
     )
     async def stats():
         """Requests, errors, cache hits, coalesced answers and latency percentiles over a rolling
@@ -222,7 +230,8 @@ def _observability_routes(application, check_auth):
         "/metrics",
         dependencies=[Security(check_auth)],
         summary="The same counters for Prometheus",
-        responses=answers(401),
+        response_class=PlainTextResponse,
+        responses={**answers(401), 200: {"content": {"text/plain": {"example": METRICS_EXAMPLE}}}},
     )
     async def metrics():
         """The counters of /stats in the Prometheus text format, with gauges for readiness, active

@@ -22,6 +22,7 @@ from app.schemas import (
     JobAccepted,
     JobStatus,
 )
+from app.status_schemas import Health, ServiceBanner, Stats
 
 # Without a key the service publishes its schema; that is the surface a reader sees.
 SCHEMA = create_app(replace(settings, api_key=None)).openapi()
@@ -34,6 +35,9 @@ RESPONSES = {
     "BatchCrawlItemResult": BatchCrawlItemResult,
     "BatchCrawlResponse": BatchCrawlResponse,
     "JobStatus": JobStatus,
+    "ServiceBanner": ServiceBanner,
+    "Health": Health,
+    "Stats": Stats,
 }
 
 
@@ -101,6 +105,17 @@ def test_every_endpoint_names_the_errors_it_can_answer(operation):
     assert documented == ERRORS[operation], f"{operation} documents {sorted(documented)}"
     vague = sorted(status for status in documented if len(responses[status]["description"]) < 40)
     assert not vague, f"{operation} does not say when these happen: {vague}"
+
+
+@pytest.mark.parametrize("path", ["/", "/health", "/stats"])
+def test_the_status_answers_show_their_fields(path):
+    content = SCHEMA["paths"][path]["get"]["responses"]["200"]["content"]["application/json"]
+    assert "$ref" in content["schema"], f"GET {path} shows an empty object in /docs"
+
+
+def test_metrics_is_documented_as_prometheus_text():
+    content = SCHEMA["paths"]["/metrics"]["get"]["responses"]["200"]["content"]
+    assert list(content) == ["text/plain"], f"/docs promises {list(content)}"
 
 
 def test_the_service_explains_itself_on_its_front_page():

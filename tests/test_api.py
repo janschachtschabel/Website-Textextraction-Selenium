@@ -236,6 +236,39 @@ async def test_error_answers_have_the_shape_docs_describe(api):
     ErrorAnswer.model_validate(unknown.json())
 
 
+def assert_documented_fields(model, value, where):
+    """The served answer has exactly the fields the model documents, at every level."""
+    from pydantic import BaseModel
+
+    served, documented = set(value), set(model.model_fields)
+    assert served == documented, (
+        f"{where}: undocumented {sorted(served - documented)}, never served {sorted(documented - served)}"
+    )
+    for name, field in model.model_fields.items():
+        if isinstance(field.annotation, type) and issubclass(field.annotation, BaseModel):
+            assert_documented_fields(field.annotation, value[name], f"{where}.{name}")
+
+
+async def test_status_answers_have_the_fields_docs_describe(api):
+    from app.status_schemas import Health, ServiceBanner, Stats
+
+    client, _, resources = api
+    # /health answers its dict as it is. /stats goes through its model, which drops what it
+    # does not know, so its counters are compared at the source, where a new one would
+    # otherwise vanish from the answer without a word.
+    counters = await resources.metrics.stats(await resources.io(len, resources.cache))
+    counters["capacity"] = resources.service.capacity.stats()
+    banner, health, stats = [await client.get(path) for path in ("/", "/health", "/stats")]
+    assert (banner.status_code, health.status_code, stats.status_code) == (200, 200, 200)
+    for where, model, answer in (
+        ("GET /", ServiceBanner, banner.json()),
+        ("GET /health", Health, health.json()),
+        ("the /stats counters", Stats, counters),
+    ):
+        assert_documented_fields(model, answer, where)
+        model.model_validate(answer)
+
+
 async def test_unsettled_rendered_page_is_returned_but_not_a_cached_success(api):
     from app.results import FetchResult
 
