@@ -1,3 +1,4 @@
+import json
 import socket
 import time
 from dataclasses import replace
@@ -7,6 +8,7 @@ import httpx
 import pytest
 
 from app.config import settings
+from app.converter import convert_document
 from app.deadline import Deadline
 from app.http_fetcher import HTTPFetcher
 from app.preflight import blocked_content, needs_browser
@@ -263,3 +265,99 @@ def test_image_alt_text_is_not_visible_content_for_that_shortcut():
         "![" + "Beschreibung eines Bildes " * 60 + "](https://example.com/bild.png)", "bs4", "ok"
     )
     assert needs_browser(shell, alt_only) is True
+
+
+def routed(html, status=200):
+    """The routing answer for what the HTTP path really extracts from this page."""
+    data = html.encode()
+    fetched = FetchResult(data, "https://example.com/page", status, "text/html; charset=utf-8")
+    return needs_browser(fetched, convert_document(data, "text/html; charset=utf-8", "https://example.com/page"))
+
+
+def shell(title, body):
+    return f'<!doctype html><html lang="de"><head><meta charset="utf-8"><title>{title}</title></head><body>{body}</body></html>'
+
+
+KMAP_LESSON = {
+    "topic": "Symmetrie",
+    "description": "<p>"
+    + "Eine Figur heißt achsensymmetrisch, wenn die Spiegelung an ihrer Achse sie auf sich selbst abbildet. " * 6
+    + "</p>",
+    "attachments": [],
+}
+
+
+@pytest.mark.parametrize(
+    "html, status",
+    [
+        # The title and a notice for browsers without JavaScript are all the text of this React shell.
+        (
+            shell(
+                "Mathe-App",
+                "<noscript>You need to enable JavaScript to run this app.</noscript>"
+                '<div id="root"></div><script src="/static/app.js"></script>',
+            ),
+            200,
+        ),
+        # An Angular app under its own element, showing a loader image.
+        (
+            shell(
+                "edu-sharing",
+                '<es-app><img src="/assets/loading.gif" alt=""></es-app>'
+                '<script src="runtime.js" type="module"></script><script src="main.js" type="module"></script>',
+            ),
+            200,
+        ),
+        # A custom element that an inline module starts.
+        (shell("Suche", '<app-root></app-root><script type="module">import("/main.js")</script>'), 200),
+        # An inline loader, and the message the app hides once it runs.
+        (
+            shell(
+                "Mathematik",
+                '<div id="loading-error">A required part of this site could not load. Check your connection '
+                "or try another browser.</div><script>(function () { const s = document.createElement('script'); "
+                "s.src = '/app.js'; document.head.appendChild(s) })()</script>",
+            ),
+            200,
+        ),
+        # A bot challenge, which lets a browser through once its script has run.
+        (shell("Just a moment...", '<div class="main-wrapper"></div><script>window._cf_chl_opt = {}</script>'), 403),
+    ],
+    ids=["react-title", "angular-loader-image", "inline-module", "inline-loader", "challenge-403"],
+)
+def test_a_thin_extraction_from_a_page_that_runs_javascript_is_rendered(html, status):
+    assert routed(html, status) is True
+
+
+@pytest.mark.parametrize(
+    "html, status",
+    [
+        # The lesson travels in a data block the HTTP path reads, although the body shows nothing.
+        (
+            shell(
+                "KMap",
+                '<kmap-main></kmap-main><script id="embedded-topic" type="json">'
+                + json.dumps(KMAP_LESSON)
+                + '</script><script src="/app/kmap.js" type="module"></script>',
+            ),
+            200,
+        ),
+        # Little text and nothing that runs.
+        (shell("Kontakt", "<main>Schreiben Sie uns.</main>"), 200),
+        # A data block runs nothing either.
+        (
+            shell(
+                "Kontakt",
+                '<main>Schreiben Sie uns.</main><script type="application/ld+json">{"@type": "Organization"}</script>',
+            ),
+            200,
+        ),
+        # Error answers that name no challenge: the browser would receive the same.
+        (shell("Not found", '<div id="root"></div><script src="/app.js"></script>'), 404),
+        (shell("Too many requests", '<div id="root"></div><script src="/app.js"></script>'), 429),
+        (shell("Service unavailable", '<div id="root"></div><script src="/app.js"></script>'), 503),
+    ],
+    ids=["kmap-lesson", "no-script", "json-ld", "404", "429", "503"],
+)
+def test_enough_text_no_javascript_or_a_plain_error_answer_stays_on_http(html, status):
+    assert routed(html, status) is False

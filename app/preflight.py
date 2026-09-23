@@ -12,9 +12,8 @@ _CHALLENGE = re.compile(
 )
 
 
-def blocked_content(text: str, status: int | None) -> bool:
-    if status is not None and status >= 400:
-        return True
+def challenge_text(text: str) -> bool:
+    """A bot check such as Cloudflare's "Just a moment...", which a browser may pass."""
     if len(text) >= 1000:
         return False
     # The phrase opens the first or second non-empty line; the first can be the site name or a heading.
@@ -22,9 +21,16 @@ def blocked_content(text: str, status: int | None) -> bool:
     return any(_CHALLENGE.match(line) for line in lines[:2])
 
 
+def blocked_content(text: str, status: int | None) -> bool:
+    return (status is not None and status >= 400) or challenge_text(text)
+
+
 _IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _LINK_TARGET = re.compile(r"\]\([^)]*\)")
-SHELL_TEXT_LIMIT = 1000  # both shell rules need a page with almost no text
+# Below this, the plain HTML did not give the page. On 18 real pages measured on 2026-09-23,
+# every page that rendering rescued extracted at most 297 visible characters over HTTP,
+# while rendering made LearningApps (571) and a KMap lesson (761) worse.
+THIN_TEXT_LIMIT = 500
 
 
 def visible_length(markdown: str) -> int:
@@ -33,26 +39,26 @@ def visible_length(markdown: str) -> int:
     return len(re.sub(r"\W+", "", text))
 
 
+def _runs_javascript(soup: BeautifulSoup) -> bool:
+    """A script the browser executes; JSON-LD and other data blocks run nothing."""
+    for script in soup.find_all("script"):
+        kind = (script.get("type") or "").strip().lower()
+        if kind in {"", "module"} or "javascript" in kind or "ecmascript" in kind:
+            return True
+    return False
+
+
 def needs_browser(fetched: FetchResult, converted: ConversionResult) -> bool:
-    if fetched.truncated or fetched.status_code is None or not 200 <= fetched.status_code < 300:
+    """Whether auto mode renders: the plain HTML gave too little text, and the page runs the
+    JavaScript that may add it. A bot challenge qualifies whatever its status, since a browser
+    may pass it; any other error answer would render the same."""
+    if fetched.truncated or fetched.status_code is None:
         return False
     if "html" not in (fetched.content_type or "").lower():
         return False
-    if blocked_content(converted.markdown, fetched.status_code):
+    if not (200 <= fetched.status_code < 300 or challenge_text(converted.markdown)):
         return False
-    # This much extracted text answers both rules below, without parsing the document again.
-    if converted.status == "ok" and visible_length(converted.markdown) >= SHELL_TEXT_LIMIT:
+    # This much extracted text answers the question without parsing the document again.
+    if converted.status == "ok" and visible_length(converted.markdown) >= THIN_TEXT_LIMIT:
         return False
-    soup = BeautifulSoup(decode_text(fetched.data, fetched.content_type), "lxml")
-    has_script = bool(soup.find("script", src=True))
-    has_root = bool(soup.select_one("#root, #app, #__next, [ng-version]"))
-    for tag in soup(["script", "style", "noscript"]):
-        tag.decompose()
-    visible = soup.get_text(" ", strip=True)
-    requires_js = bool(
-        re.search(r"(enable javascript|javascript (?:required|wird benötigt)|javascript.*aktivieren)", visible, re.I)
-    )
-    shell_text = visible.lower().strip(" .…!") in {"", "loading", "loading content", "wird geladen"}
-    return ((converted.status != "ok" or shell_text) and has_script and has_root) or (
-        requires_js and len(visible) < 500
-    )
+    return _runs_javascript(BeautifulSoup(decode_text(fetched.data, fetched.content_type), "lxml"))
