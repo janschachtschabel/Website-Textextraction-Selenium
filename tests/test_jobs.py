@@ -1,6 +1,7 @@
 """Background batch jobs: submit, poll, bounded, and honest about interrupted work."""
 
 import asyncio
+import gc
 import time
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -13,6 +14,7 @@ from app.config import settings
 from app.jobs import KEY, _row_key
 from app.main import create_app
 from app.resources import STORAGE_LAYOUT, Resources
+from app.schemas import BatchCrawlItemResult
 
 
 class NoBrowser:
@@ -80,6 +82,28 @@ def store_rows(resources, job_id, count, done=None):
         resources.state.set(_row_key(job_id, seq), row)
 
 
+async def all_rows(client, job_id):
+    """Every row of a job that has ended, paged the way a client reads them."""
+    rows, offset = [], 0
+    while True:
+        page = (await client.get(f"/jobs/{job_id}/results?offset={offset}&limit=100")).json()
+        if not page["results"]:
+            return rows
+        rows += page["results"]
+        offset = page["next_offset"]
+
+
+def watch_rows(monkeypatch, jobs, observe):
+    """Call observe(seq, row) as each row is written, then write it."""
+    original = jobs._write_row
+
+    async def spy(job_id, seq, row, keep):
+        observe(seq, row)
+        await original(job_id, seq, row, keep)
+
+    monkeypatch.setattr(jobs, "_write_row", spy)
+
+
 def saves(monkeypatch, jobs):
     """Every record the runner writes, as (status, progress). A poll cannot see writes the
     throttle swallowed, so anything about how often it writes is asserted from here."""
@@ -94,7 +118,7 @@ def saves(monkeypatch, jobs):
     return written
 
 
-async def test_a_job_runs_in_the_background_and_reports_the_batch_result(jobs_api):
+async def test_a_job_runs_in_the_background_and_reports_every_url(jobs_api):
     async with jobs_api() as (client, _):
         urls = ["https://example.com/a", "https://example.com/blocked"]
         accepted = await client.post("/jobs", json={"urls": urls, "mode": "fast"})
@@ -103,9 +127,10 @@ async def test_a_job_runs_in_the_background_and_reports_the_batch_result(jobs_ap
         assert job["status"] == "queued" and job["status_url"] == f"/jobs/{job['job_id']}"
         done = await finished(client, job["status_url"])
         assert done["status"] == "done" and done["finished_at"] and done["error"] is None
-        result = done["result"]
-        assert (result["total"], result["succeeded"], result["failed"]) == (2, 1, 1)
-        assert result["results"][1]["error"] == "Upstream status 429"
+        assert done["progress"] == {"done": 2, "succeeded": 1, "total": 2}
+        rows = {row["position"]: row for row in await all_rows(client, job["job_id"])}
+    assert sorted(rows) == [0, 1] and rows[0]["success"]
+    assert rows[1]["error"] == "Upstream status 429"
 
 
 async def test_unknown_jobs_answer_404(jobs_api):
@@ -191,7 +216,6 @@ async def test_a_job_past_its_deadline_without_a_result_is_reported_lost(jobs_ap
             "submitted_at": "2026-09-18T08:00:00+00:00",
             "deadline_at": time.time() - 120,
             "finished_at": None,
-            "result": None,
             "error": None,
         }
         resources.state.set("job:orphan", orphan)
@@ -246,7 +270,8 @@ async def test_progress_counts_successes_apart_from_failures(jobs_api):
         accepted = (await client.post("/jobs", json={"urls": urls})).json()
         body = await finished(client, accepted["status_url"])
         assert body["progress"] == {"done": 3, "succeeded": 2, "total": 3}
-        assert body["result"]["succeeded"] == 2 and body["result"]["failed"] == 1
+        rows = await all_rows(client, accepted["job_id"])
+        assert sorted(row["success"] for row in rows) == [False, True, True]
 
 
 async def test_a_queued_job_already_names_its_size(jobs_api):
@@ -274,4 +299,52 @@ async def test_a_failing_progress_write_does_not_fail_the_job(jobs_api, monkeypa
         accepted = (await client.post("/jobs", json={"urls": urls})).json()
         body = await finished(client, accepted["status_url"])
         assert body["status"] == "done", body.get("error")
-        assert body["result"]["succeeded"] == 3
+        assert len(await all_rows(client, accepted["job_id"])) == 3
+
+
+async def test_each_url_becomes_a_row_numbered_as_it_finishes(jobs_api, monkeypatch):
+    """Rows count up without gaps in the order URLs finish, and each names its URL's place
+    in the request - the only way to tell two identical URLs apart."""
+    async with jobs_api() as (client, resources):
+        seen = []
+        watch_rows(monkeypatch, resources.jobs, lambda seq, row: seen.append((seq, row["position"])))
+        urls = [f"https://example.com/{n % 3}" for n in range(6)]
+        job = (await client.post("/jobs", json={"urls": urls, "max_concurrency": 3})).json()
+        await finished(client, job["status_url"])
+    assert [seq for seq, _ in seen] == list(range(6)), seen
+    assert sorted(position for _, position in seen) == list(range(6)), seen
+
+
+async def test_a_job_holds_no_more_results_than_it_crawls_at_once(jobs_api, monkeypatch):
+    """What the rows are for: memory follows max_concurrency, not the length of the list.
+    Counted directly - result objects alive as each row is written - rather than through
+    allocator statistics, which measure far more than this. Counted against a baseline
+    taken just before the job, so a result some earlier test still holds does not count."""
+
+    def results_alive():
+        return sum(type(obj) is BatchCrawlItemResult for obj in gc.get_objects())
+
+    async with jobs_api() as (client, resources):
+        gc.collect()
+        before = results_alive()
+        alive = []
+        watch_rows(monkeypatch, resources.jobs, lambda seq, row: alive.append(results_alive() - before))
+        urls = [f"https://example.com/{n}" for n in range(12)]
+        job = (await client.post("/jobs", json={"urls": urls, "max_concurrency": 2})).json()
+        await finished(client, job["status_url"])
+    assert len(alive) == 12 and max(alive) <= 2, f"results alive as each row was written: {alive}"
+
+
+async def test_a_result_that_cannot_be_stored_fails_the_job(jobs_api, monkeypatch):
+    """Unlike progress, a row is the job's output. Losing one quietly would report a job
+    done that is missing results."""
+    async with jobs_api() as (client, resources):
+
+        async def refuse(job_id, seq, row, keep):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(resources.jobs, "_write_row", refuse)
+        urls = [f"https://example.com/{n}" for n in range(4)]
+        job = (await client.post("/jobs", json={"urls": urls, "max_concurrency": 1})).json()
+        body = await finished(client, job["status_url"])
+    assert body["status"] == "failed" and body["error"] == "Job failed (OSError)"

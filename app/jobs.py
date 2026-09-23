@@ -16,9 +16,9 @@ from .results import CrawlError
 
 KEY = "job:"
 LOST_AFTER_SECONDS = 30  # an unfinished job this far past its deadline has lost its process
-# Progress is written at most this often: a 2000-URL job would otherwise mean 2000 writes
-# to a store shared across processes. _run saves once more at the end, so the final count
-# is never the one the throttle swallowed.
+# The record's progress is saved at most this often. Each URL already costs one row write;
+# without this it would cost a record write as well, in a store shared across processes.
+# _run saves once more at the end, so the final count is never the one the throttle swallowed.
 PROGRESS_EVERY_SECONDS = 2.0
 UNFINISHED = {"queued", "running"}
 
@@ -49,7 +49,6 @@ class JobRunner:
             "submitted_at": _now(),
             "deadline_at": time.time() + options.timeout_ms / 1000,
             "finished_at": None,
-            "result": None,
             "error": None,
         }
         try:
@@ -109,33 +108,50 @@ class JobRunner:
         record["status"] = "running"
         await self._save(job_id, record)
         written = time.monotonic()
+        order = asyncio.Lock()
 
-        async def report(done, succeeded):
+        async def deliver(position, item):
             nonlocal written
-            record["progress"] = {"done": done, "succeeded": succeeded, "total": len(urls)}
+            async with order:  # numbered as they finish, so the stored rows are a gap-free prefix
+                done = record["progress"]["done"]
+                row = {"position": position, **item.model_dump(mode="json")}
+                await self._write_row(job_id, done, row, self._keep(record))
+                record["progress"] = {
+                    "done": done + 1,
+                    "succeeded": record["progress"]["succeeded"] + item.success,
+                    "total": len(urls),
+                }
             if time.monotonic() - written < PROGRESS_EVERY_SECONDS:
                 return
             written = time.monotonic()
             try:
                 await self._save(job_id, record)
             except Exception as exc:
-                # Progress is incidental; the crawling is the job. A busy state store must
-                # not turn a batch that succeeded into a failure - the rule B08 set for
-                # metrics. The record keeps the latest count, and the end save writes it.
+                # Progress is incidental; the rows are the job. A busy state store must not
+                # turn a batch that succeeded into a failure - the rule B08 set for metrics.
+                # The record keeps the latest count, and the end save writes it.
                 logger.warning("Job progress not recorded ({})", type(exc).__name__)
 
         try:
-            result = await self.resources.service.crawl_batch(urls, options, max_concurrency, report)
-            record.update(status="done", result=result.model_dump(mode="json"))
+            await self.resources.service.stream_batch(urls, options, max_concurrency, deliver)
+            record["status"] = "done"
         except Exception as exc:
             logger.error("Job failed ({})", type(exc).__name__)
             record.update(status="failed", error=f"Job failed ({type(exc).__name__})")
         record["finished_at"] = _now()
         await self._save(job_id, record)
 
-    async def _save(self, job_id, record):
-        # Unfinished records outlive their deadline long enough to be reported as lost.
+    async def _write_row(self, job_id, seq, row, keep):
+        """Not caught: a result that cannot be stored fails the job."""
+        await self.resources.io(self.resources.state.set, _row_key(job_id, seq), row, expire=keep)
+
+    def _keep(self, record):
+        """Seconds a record or row stays. Unfinished work outlives its deadline long enough to
+        be reported as lost; a row written while its job runs expires with the record."""
         keep = self.config.job_result_ttl
         if record["status"] in UNFINISHED:
             keep += max(0, record["deadline_at"] - time.time())
-        await self.resources.io(self.resources.state.set, KEY + job_id, record, expire=keep)
+        return keep
+
+    async def _save(self, job_id, record):
+        await self.resources.io(self.resources.state.set, KEY + job_id, record, expire=self._keep(record))
