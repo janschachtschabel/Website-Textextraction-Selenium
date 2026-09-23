@@ -7,22 +7,29 @@ from bs4 import BeautifulSoup
 from .markup import decode_text
 from .results import ConversionResult, FetchResult
 
-_CHALLENGE = re.compile(
+# Checks a browser can pass run a script and reload into the page. Cloudflare's "Attention
+# Required!" block page never does; it only counts as blocked.
+_PASSABLE = re.compile(r"\s*(?:#{1,6}\s*)?(just a moment|checking your browser|verifying you are human)", re.I)
+_BLOCKED = re.compile(
     r"\s*(?:#{1,6}\s*)?(just a moment|checking your browser|verifying you are human|attention required)", re.I
 )
 
 
-def challenge_text(text: str) -> bool:
-    """A bot check such as Cloudflare's "Just a moment...", which a browser may pass."""
+def _opens_with(phrase: re.Pattern, text: str) -> bool:
     if len(text) >= 1000:
         return False
     # The phrase opens the first or second non-empty line; the first can be the site name or a heading.
     lines = [line for line in text.splitlines() if line.strip()]
-    return any(_CHALLENGE.match(line) for line in lines[:2])
+    return any(phrase.match(line) for line in lines[:2])
+
+
+def challenge_text(text: str) -> bool:
+    """A bot check such as Cloudflare's "Just a moment...", which a browser may pass."""
+    return _opens_with(_PASSABLE, text)
 
 
 def blocked_content(text: str, status: int | None) -> bool:
-    return (status is not None and status >= 400) or challenge_text(text)
+    return (status is not None and status >= 400) or _opens_with(_BLOCKED, text)
 
 
 _IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")

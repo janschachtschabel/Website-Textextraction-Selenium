@@ -179,6 +179,7 @@ def test_blocked_status_short_success_and_feed_link_do_not_start_browser():
         ("Just a moment...", True),
         ("# Example Shop\n\nChecking your browser before accessing example.com.", True),
         ("www.example.com\nVerifying you are human. This may take a few seconds.", True),
+        ("Attention Required! | Cloudflare\n\nSorry, you have been blocked", True),
         ("# Physics\n\nLight changes its direction at a mirror.", False),
         ("# Physics\n\nIntroduction\n\nJust a moment of reflection explains the rays.", False),
     ],
@@ -356,8 +357,13 @@ def test_a_thin_extraction_from_a_page_that_runs_javascript_is_rendered(html, st
         (shell("Not found", '<div id="root"></div><script src="/app.js"></script>'), 404),
         (shell("Too many requests", '<div id="root"></div><script src="/app.js"></script>'), 429),
         (shell("Service unavailable", '<div id="root"></div><script src="/app.js"></script>'), 503),
+        # A block page whose only text is its title: no check runs that a browser could pass.
+        (
+            shell("Attention Required! | Cloudflare", '<div id="cf-wrapper"></div><script src="/cf/main.js"></script>'),
+            403,
+        ),
     ],
-    ids=["kmap-lesson", "no-script", "json-ld", "404", "429", "503"],
+    ids=["kmap-lesson", "no-script", "json-ld", "404", "429", "503", "block-page-403"],
 )
 def test_enough_text_no_javascript_or_a_plain_error_answer_stays_on_http(html, status):
     assert routed(html, status) is False

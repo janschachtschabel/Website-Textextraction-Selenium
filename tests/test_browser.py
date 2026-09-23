@@ -151,13 +151,13 @@ def test_auto_wait_limit_starts_after_explicit_waits(monkeypatch, explicit):
 class ChallengeDriver:
     """Fake Chrome whose title names a bot challenge for its first `challenged` reads."""
 
-    def __init__(self, challenged):
-        self.challenged, self.reads = challenged, 0
+    def __init__(self, challenged, challenge="Just a moment..."):
+        self.challenged, self.challenge, self.reads = challenged, challenge, 0
 
     @property
     def title(self):
         self.reads += 1
-        return "Just a moment..." if self.reads <= self.challenged else "Lesson"
+        return self.challenge if self.reads <= self.challenged else "Lesson"
 
 
 def test_a_bot_challenge_is_awaited_until_the_page_moves_on():
@@ -170,9 +170,20 @@ def test_a_bot_challenge_is_awaited_until_the_page_moves_on():
 def test_a_challenge_that_never_clears_ends_at_its_limit(monkeypatch):
     monkeypatch.setattr(browser_readiness, "CHALLENGE_LIMIT_SECONDS", 0.3)
     options = resolve_options(CrawlRequest(url="https://example.com", js_strategy="accuracy", js_auto_wait=True))
+    driver = ChallengeDriver(challenged=10**6)
     started = time.monotonic()
-    browser_readiness.wait_for_challenge(ChallengeDriver(challenged=10**6), options, Deadline(5))
+    browser_readiness.wait_for_challenge(driver, options, Deadline(5))
     assert time.monotonic() - started < 2
+    assert driver.reads > 1
+
+
+def test_a_block_page_is_not_awaited(monkeypatch):
+    # Cloudflare's block page never lets a browser through, unlike its "Just a moment..." check.
+    monkeypatch.setattr(browser_readiness, "CHALLENGE_LIMIT_SECONDS", 0.3)
+    driver = ChallengeDriver(challenged=10**6, challenge="Attention Required! | Cloudflare")
+    options = resolve_options(CrawlRequest(url="https://example.com", js_strategy="speed", js_auto_wait=True))
+    browser_readiness.wait_for_challenge(driver, options, Deadline(5))
+    assert driver.reads == 1
 
 
 def test_without_auto_wait_a_challenge_is_read_as_it_is():
