@@ -160,91 +160,167 @@ class CrawlOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     mode: Literal["fast", "js", "auto"] | None = Field(
         None,
-        description="fast reads the HTTP response only, js always renders the page in Chrome, "
-        "auto renders it when the plain HTML yields too little",
+        description="How the page is fetched. fast reads the HTTP response only; js always renders the "
+        "page in Chrome; auto reads the HTTP response and renders in Chrome only when that yields a "
+        "script-built shell: under 1000 characters of text with an app root such as #root, or a page "
+        "asking for JavaScript. fetch_engine in the answer says which ran. Default: DEFAULT_MODE, auto",
     )
     js_strategy: Literal["accuracy", "speed"] | None = Field(
         None,
-        description="accuracy waits for the page to settle; speed shortens that wait and blocks "
-        "images, fonts and media, unless a screenshot is requested",
+        description="How Chrome loads the page. accuracy waits for the full page load; speed reads it once "
+        "the document is parsed and blocks image, font and media files by extension unless a screenshot "
+        "is taken. With js_auto_wait, speed wants 0.3 s of still text instead of 1 s and gives up after "
+        "10 s instead of 20 s. Default: DEFAULT_JS_STRATEGY, speed",
     )
     timeout_ms: int | None = Field(
         None,
         ge=1000,
         le=TIMEOUT_CEILING_SECONDS * 1000,
-        description="End-to-end deadline including queue time, up to the operator's MAX_TIMEOUT_SECONDS",
+        description="Deadline for the whole request in milliseconds: waiting for capacity and for the "
+        "host's rate limit counts, as do fetching, rendering and conversion. For a batch or job it "
+        "covers all its URLs together. At most the operator's MAX_TIMEOUT_SECONDS, 600 unless raised; "
+        "more is refused with 422. Default: DEFAULT_TIMEOUT_SECONDS, 120",
     )
-    retries: int | None = Field(None, ge=0, le=10, description="Repeats of a failed fetch, all within the deadline")
+    retries: int | None = Field(
+        None,
+        ge=0,
+        le=10,
+        description="How often a failed fetch is repeated, within timeout_ms. Over HTTP: after status "
+        "429, 500, 502, 503 or 504 and after a connection error, waiting the Retry-After the site sends "
+        "(30 s at most) or 1, 2, 4, then 8 s. In Chrome: after a navigation error, except a rejected "
+        "certificate or a blocked request. A timeout is not repeated. Default: DEFAULT_RETRIES, 1",
+    )
     max_bytes: int | None = Field(
         None,
         ge=1024,
         le=100 * 1024 * 1024,
-        description="Decoded HTTP body or rendered HTML limit; truncation is reported",
+        description="Most bytes read: the decoded HTTP body, or the HTML Chrome renders. A longer page "
+        "is cut there, a warning says so, and the answer is not a success. It does not bound the "
+        "screenshot. Default: DEFAULT_MAX_BYTES, 10 MiB",
     )
-    proxy: str | None = Field(None, description="HTTP(S) proxy; numeric CONNECT destinations must be supported")
+    proxy: str | None = Field(
+        None,
+        description="HTTP(S) proxy for this crawl, credentials in the URL allowed "
+        "(http://user:password@host:port). It must accept CONNECT to numeric addresses: the service "
+        "resolves and checks every destination itself. A proxy that does not resolve, or under the "
+        "default network policy resolves to a private address, is refused with 400 before any connection",
+    )
     allow_insecure_ssl: bool | None = Field(
-        None, description="Continue even when the TLS certificate of the site does not validate"
+        None,
+        description="Accept a site whose TLS certificate does not validate, over HTTP and in Chrome. "
+        "Default: ALLOW_INSECURE_SSL, false",
     )
     user_agent: str | None = Field(
         None,
         min_length=1,
         max_length=512,
-        description="User-Agent this crawl sends; the operator's default applies when omitted",
+        description="User-Agent header this crawl sends, printable ASCII. robots.txt is read for it too. "
+        "Default: the operator's DEFAULT_USER_AGENT, which names this service and a contact URL",
     )
     accept_language: str | None = Field(
-        None, max_length=256, description="Accept-Language header; empty sends none. Chrome gets the language list"
+        None,
+        max_length=256,
+        description="Accept-Language header, such as de-DE,de;q=0.9. Empty sends none; Chrome gets it "
+        "as its language list. Default: DEFAULT_ACCEPT_LANGUAGE, empty",
     )
-    headless: bool | None = Field(None, description="Run Chrome without a window. Only the browser engine reads this")
+    headless: bool | None = Field(
+        None,
+        description="Run Chrome without a window. Only rendering reads this; a container has no display, "
+        "so keep it true there. Default: DEFAULT_HEADLESS, true",
+    )
     js_auto_wait: bool | None = Field(
         None,
-        description="Wait until the page stops changing. Without it, and without a selector or a "
-        "minimum wait, the page is read as soon as it loads",
+        description="In Chrome, wait until the page stops changing: its text still, no aria-busy or "
+        "spinning progress bar left, mathematics typeset. It gives up after 10 s (speed) or 20 s "
+        "(accuracy), counted once the selectors and the minimum wait are met, and the answer is then "
+        "marked incomplete and not a success. Without it, a selector or wait_for_ms, the page is read "
+        "as soon as it has loaded. Default: DEFAULT_JS_AUTO_WAIT, true",
     )
     wait_for_selectors: list[str] = Field(
         default_factory=list,
         max_length=10,
-        description="CSS selectors that must all become visible before the page is read",
+        description="CSS selectors that must each match a visible element before the page is read. The "
+        "wait has no limit of its own: a selector that never appears runs into timeout_ms (504). An "
+        "invalid selector is refused with 422. Only rendering reads this",
     )
-    wait_for_ms: int = Field(0, ge=0, le=30_000, description="Optional minimum wait, within the request deadline")
+    wait_for_ms: int = Field(
+        0,
+        ge=0,
+        le=30_000,
+        description="Minimum wait in Chrome before the page is read, in milliseconds, within timeout_ms. "
+        "Only rendering reads this",
+    )
     html_converter: Literal["trafilatura", "markitdown", "bs4"] | None = Field(
         None,
-        description="trafilatura extracts the article, markitdown converts the whole document, bs4 "
-        "is the plain-text fallback. One that yields nothing falls back to the next",
+        description="What turns HTML into Markdown. trafilatura extracts the main text, markitdown "
+        "converts the whole document, bs4 takes its plain text. When one yields nothing the next is "
+        "tried, in this order; converter in the answer names the one whose text you get. Default: "
+        "HTML_CONVERTER, trafilatura",
     )
     trafilatura_clean_markdown: bool | None = Field(
-        None, description="Extract the article instead of the whole page text. Only trafilatura reads this"
+        None,
+        description="With trafilatura: true extracts the article as Markdown, with its links and "
+        "tables and without navigation, headers or comments; false returns the whole page as plain "
+        "text. The other converters ignore it. Default: TRAFILATURA_CLEAN_MARKDOWN, true",
     )
     media_conversion_policy: Literal["skip", "metadata", "full", "none"] | None = Field(
         None,
-        description="For audio and video: skip and none refuse them, metadata returns the ffprobe "
-        "record. full is not implemented and is refused as unsupported",
+        description="What happens to audio and video. skip and none leave them unconverted "
+        "(extraction_status skipped); metadata returns the ffprobe record as JSON, which needs ffprobe "
+        "on the host - the published image has none, so there it fails with a warning; full is not "
+        "implemented and answers unsupported. Default: MEDIA_CONVERSION_POLICY, skip",
     )
-    extract_links: bool = Field(False, description="Return the page's links, categorised and made absolute")
-    extract_metadata: bool = Field(False, description="Return title, author, date, canonical URL and language")
+    extract_links: bool = Field(
+        False,
+        description="Return the page's links in links: absolute URL, text, whether it stays on the host, "
+        "and a category such as content, nav or legal to filter by. HTML pages only; not with anonymize",
+    )
+    extract_metadata: bool = Field(
+        False,
+        description="Return what the page declares about itself in metadata: title, description, author, "
+        "publication date, site name, canonical URL and language, read from its meta tags, JSON-LD and "
+        "<html lang> by fixed rules. HTML pages only; not with anonymize",
+    )
     screenshot: bool = Field(
-        False, description="Return a PNG of the page as base64. Needs the browser, so mode=js or auto"
+        False,
+        description="Return a PNG of the rendered page, base64 in screenshot_base64, up to 4000 by 20000 "
+        "pixels. Only rendering takes one: mode=js always, auto only when it renders, fast never; a "
+        "missing screenshot is named in warnings. Not with anonymize",
     )
     screenshot_full_page: bool = Field(
-        False, description="Whole document instead of the viewport, clipped at 4000 by 20000 pixels"
+        False,
+        description="The whole document instead of the visible viewport, clipped at 4000 by 20000 pixels. "
+        "Needs screenshot",
     )
     anonymize: bool = Field(
         False,
-        description="Remove personal data from the text. Links, metadata and the screenshot are "
-        "suppressed for an anonymised answer",
+        description="Replace personal data in the Markdown, such as names, places, e-mail addresses and "
+        "phone numbers, using Presidio with a spaCy model; anonymization says what was found. Links, "
+        "metadata and the screenshot are left out of such an answer. Needs the PII extra and the "
+        "language's model, which the published image does not include: there it answers 503",
     )
-    anonymize_language: Literal["de", "en"] = Field("de", description="Language of the recogniser used to anonymise")
+    anonymize_language: Literal["de", "en"] = Field(
+        "de",
+        description="Language of the text for anonymize; each needs its spaCy model, set by "
+        "PRESIDIO_DE_MODEL or PRESIDIO_EN_MODEL",
+    )
     crawl_rate_limit_rps: float | None = Field(
         None,
         ge=0,
         le=100,
-        description="Requests per second against the target host. The operator's limit is a ceiling; "
-        "a lower value is honoured, a higher one is not",
+        description="Most requests per second to the target host, shared by every request to that host; "
+        "0 sets no limit of your own. The operator's DEFAULT_DOMAIN_RATE_LIMIT_RPS, when set, is a "
+        "ceiling: a lower value is honoured, a higher one or 0 is not. Default: that setting, 0 (off)",
     )
     respect_robots_txt: bool | None = Field(
-        None, description="Ask the host's robots.txt first and answer 403 when it disallows the path"
+        None,
+        description="Read the host's robots.txt first and refuse the URL with 403 when it disallows the "
+        "path for this crawl's User-Agent. Default: RESPECT_ROBOTS_TXT, false",
     )
     force_refresh: bool = Field(
-        False, description="Fetch anew instead of answering from the cache or from a request already running"
+        False,
+        description="Fetch anew: ignore a cached result, which is kept RESULT_CACHE_TTL (300 s), and do "
+        "not join an identical request already running",
     )
 
     @model_validator(mode="after")
@@ -281,7 +357,10 @@ class CrawlOptions(BaseModel):
 
 class CrawlRequest(CrawlOptions):
     model_config = ConfigDict(json_schema_extra={"examples": [CRAWL_EXAMPLE]})
-    url: HttpUrl = Field(description="Address to crawl; http and https only")
+    url: HttpUrl = Field(
+        description="Address to crawl, http or https. The network policy checks where it resolves before "
+        "the first request, and again for every redirect and for the address Chrome finally shows"
+    )
 
 
 class BatchCrawlRequest(CrawlOptions):
@@ -289,10 +368,16 @@ class BatchCrawlRequest(CrawlOptions):
     urls: list[HttpUrl] = Field(
         min_length=1,
         max_length=URL_CEILING,
-        description="Addresses to crawl, up to the operator's MAX_URLS_PER_REQUEST (50 unless raised)",
+        description="Addresses to crawl, up to the operator's MAX_URLS_PER_REQUEST (50 unless raised); "
+        "more are refused with 422. Each URL is admitted, cached and answered on its own, so one that "
+        "fails does not fail the others",
     )
     max_concurrency: int = Field(
-        3, ge=1, le=10, description="URLs fetched at once, within the service's global capacity"
+        3,
+        ge=1,
+        le=10,
+        description="URLs of this batch fetched at once. Each takes a slot of the service-wide "
+        "MAX_CONCURRENT_REQUESTS, which can hold it lower",
     )
 
 

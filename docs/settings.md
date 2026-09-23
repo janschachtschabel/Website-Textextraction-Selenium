@@ -121,8 +121,8 @@ Each of these is what a request gets when it does not say otherwise.
 | `DEFAULT_JS_STRATEGY` | `speed` | `speed` also drops images, fonts and media, which it can only do when no screenshot is wanted. `accuracy` loads everything. |
 | `DEFAULT_JS_AUTO_WAIT` | `true` | Wait for the page to settle rather than returning at load. |
 | `HTML_CONVERTER` | `trafilatura` | First converter to try: `trafilatura`, `markitdown` or `bs4`. The others follow as fallbacks. |
-| `TRAFILATURA_CLEAN_MARKDOWN` | `true` | Extract the main content. `false` converts the whole document. |
-| `MEDIA_CONVERSION_POLICY` | `skip` | `skip`/`none` ignore audio and video, `metadata` reads their tags. `full` is not implemented and is refused as unsupported. |
+| `TRAFILATURA_CLEAN_MARKDOWN` | `true` | Extract the main content as Markdown. `false` returns the whole page as plain text. |
+| `MEDIA_CONVERSION_POLICY` | `skip` | `skip`/`none` ignore audio and video, `metadata` reads their tags with `ffprobe`, which the published image does not include. `full` is not implemented and is refused as unsupported. |
 | `ALLOW_INSECURE_SSL` | `false` | Accept invalid certificates. |
 | `SSRF_PROTECTION` | `true` | Validate every hop and every connection against private and link-local address ranges. Leave it on. |
 

@@ -476,7 +476,8 @@ it can be pasted into an editor that only understands that form.
   screenshots are suppressed for these responses. Source URL metadata remains URL metadata;
   automated PII detection is not a guarantee that every identifier is recognized.
 - Media `skip`/`none` return `extraction_status=skipped` with empty Markdown.
-  `metadata` uses local `ffprobe` with a bounded runtime. See migration notes for
+  `metadata` uses local `ffprobe` with a bounded runtime; the published image does not
+  include it, so there `metadata` answers `failed` with a warning. See migration notes for
   the restrictions on legacy `full` transcription.
 
 Each browser job has a new profile, preventing cross-request cookies/storage.
