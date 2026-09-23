@@ -58,8 +58,17 @@ carries `position`, its index in the request, and otherwise the fields an entry 
 - Collect the results of jobs that have finished. The new service has no field to return
   them in; they would expire within `JOB_RESULT_TTL` anyway.
 - Unfinished jobs end with the restart, as with any upgrade.
-- A panel that updates to `latest` delivers 3.0 on the next update. Until the client reads
-  `results_url`, pin `jschachtschabel/website-textextraction:2.3.1` in its compose file.
+- A panel that deploys the compose file from `main`, as the
+  [README](../README.md#deploy-from-a-panel-without-a-checkout) describes, gets 3.0 with its
+  next update. Until the client reads `results_url`, point the panel at the file of the
+  `v2.3.1` tag instead. It differs from the 3.0 file only in naming the image `:2.3.1`:
+
+  ```
+  https://raw.githubusercontent.com/janschachtschabel/Website-Textextraction-Selenium/v2.3.1/docker-compose.yml
+  ```
+
+- A compose file that names `latest` gets 3.0 with the next pull; name `:2.3.1` there
+  instead.
 
 ## What it buys
 

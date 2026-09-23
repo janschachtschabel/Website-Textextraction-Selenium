@@ -1173,13 +1173,16 @@ Then `/better-coding-review` over the whole series before anything is published.
 
 Not a task: it needs the user.
 
-1. The user's panel pulls `latest`. Publishing 3.0.0 moves `latest`, and the next click on
-   Update delivers the breaking change.
-2. Before `git tag v3.0.0`: the user confirms the client reads `results_url`, or pins
-   `jschachtschabel/website-textextraction:2.3.1` in the panel's compose file.
-3. Then tag; the workflow builds, smoke-tests, checks the namespace and pushes. Afterwards,
-   as for 2.3.1: the tags on Docker Hub, the version inside the pulled image, and one real
-   job read through `results_url`.
+1. The user's panel deploys the compose file from `main`, which names a fixed image tag.
+   Once `main` names `:3.0.0`, the next click on Update delivers the breaking change;
+   publishing also moves `latest` for anyone who pulls that.
+2. Before tagging or merging: the user confirms the client reads `results_url`, or points
+   the panel at the compose file of the `v2.3.1` tag, as `docs/migration-3.0.md` shows.
+3. Then tag the branch head `v3.0.0`; the workflow builds, smoke-tests, checks the
+   namespace and pushes. Fast-forward `main` only once `:3.0.0` is on Docker Hub, so the
+   file a panel fetches never names an image that does not exist yet. Afterwards, as for
+   2.3.1: the tags on Docker Hub, the version inside the pulled image, and one real job
+   read through `results_url`.
 
 ## Known limitations after this plan
 
@@ -1231,3 +1234,7 @@ above:
   both versions share. diskcache maps each store file with up to 64 MiB and caches up to
   32 MiB per connection, which fits the size but was not measured. The bound on result
   objects rests on the gc test; the container-level claim is open.
+- **Release.** The plan assumed the user's panel pulls `latest`. It deploys the compose
+  file from `main`, the route the README describes, and that file names a fixed tag. The
+  migration note therefore shows the `v2.3.1` file to point such a panel at, and the
+  release tags first and moves `main` once the image exists.
