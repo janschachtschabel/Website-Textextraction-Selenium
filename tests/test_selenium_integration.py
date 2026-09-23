@@ -85,6 +85,13 @@ async def browser(monkeypatch):
                         "<title>Just a moment...</title><div>Checking your browser</div>"
                         '<script>setTimeout(()=>{document.cookie="cleared=1; path=/";location.reload()},1000)</script>'
                     )
+            elif path == "/late-main-shadow-header":
+                html = (
+                    '<site-header></site-header><main></main><script>customElements.define("site-header", class '
+                    'extends HTMLElement {connectedCallback() {this.attachShadow({mode: "open"}).innerHTML = '
+                    '"<p>Header in a shadow root</p>"}}); setTimeout(()=>{document.querySelector("main").innerText='
+                    '"LATE"+"CONTENT arrived"},1500)</script>'
+                )
             elif path == "/shadow":
                 html = (
                     '<lesson-view></lesson-view><script>customElements.define("lesson-view", class extends HTMLElement '
@@ -182,7 +189,7 @@ async def test_hidden_or_static_progress_and_empty_first_main_do_not_delay_readi
     assert result.status_code == 200 and not result.warnings
 
 
-@pytest.mark.parametrize("path", ["/late-main", "/busy-list", "/modal-spinner"])
+@pytest.mark.parametrize("path", ["/late-main", "/busy-list", "/modal-spinner", "/late-main-shadow-header"])
 async def test_content_that_arrives_late_is_still_awaited(browser, path):
     fetch, _, _ = browser
     result = await fetch(path, seconds=20, js_strategy="speed", js_auto_wait=True)

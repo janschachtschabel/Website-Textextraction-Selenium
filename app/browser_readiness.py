@@ -23,15 +23,16 @@ _NET_ERROR = re.compile(r"net::ERR_[A-Z0-9_]+")
 SNAPSHOT = """
 // Pages may contain an empty <main> before the real one: use the first candidate with text. If all
 // candidates are still empty, the first one is awaited; only pages without candidates use the body.
-let text = null;
+let text = null, region = null;
 for (const el of document.querySelectorAll('main, article, [role=main]')) {
   const candidate = el.innerText || '';
-  if (candidate.trim()) { text = candidate; break; }
-  if (text === null) text = candidate;
+  if (candidate.trim()) { text = candidate; region = el; break; }
+  if (text === null) { text = candidate; region = el; }
 }
-if (text === null) text = (document.body && document.body.innerText) || '';
-// Web components keep their text in shadow roots, which innerText leaves out. They count only
-// while the light DOM shows nothing, so other pages wait exactly as before.
+if (text === null) { text = (document.body && document.body.innerText) || ''; region = document.body; }
+// Web components keep their text in shadow roots, which innerText leaves out. They count only inside
+// the region awaited and while it shows no other text: a shadow-root header must not end the wait
+// for an empty <main>.
 const shadowText = root => {
   let out = '';
   for (const el of root.querySelectorAll('*')) {
@@ -43,7 +44,7 @@ const shadowText = root => {
   }
   return out;
 };
-if (!text.trim() && document.body) text = shadowText(document.body);
+if (!text.trim() && region) text = shadowText(region);
 const rendered = el => !!(el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
 // A busy region counts while rendered, even while empty. Only indeterminate progressbars are loading
 // indicators: a value (aria-valuenow) marks static progress such as skill bars, and aria-hidden or a
