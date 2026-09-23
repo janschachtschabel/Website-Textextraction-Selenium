@@ -3,6 +3,51 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## 3.0.0 - 2026-09-23
+
+### Changed - a job's results are read as they finish
+
+Breaking for clients of `POST /jobs` that read `result`: [docs/migration-3.0.md](docs/migration-3.0.md)
+says what to change. `POST /crawl/batch` is unchanged.
+
+A job kept every result in memory until it ended and returned them as one record. At the
+sizes 2.3.0 made possible that became the limit: measured at 2000 URLs, 22 MB where pages
+yield 10 KB of Markdown, 63 MB at 30 KB and 165 MB at 80 KB, per job and per worker
+process. Nothing could be read before the last URL finished, and a container restart after
+1800 of 2000 URLs lost all 1800.
+
+- Each URL is stored as a row the moment it finishes. `GET /jobs/{job_id}/results` pages
+  through them while the job runs and after: in the order they finished, each naming its
+  `position` in the request; `limit` is 20 by default and 100 at most, and each page's
+  `next_offset` is passed on.
+- `GET /jobs/{job_id}` reports `progress` and a `results_url` instead of `result`, and
+  `POST /jobs` names the `results_url` from the start.
+- A job holds at most `max_concurrency` results in memory. Each is handed over while its
+  URL still holds its concurrency slot, so a slow state store slows the batch instead of
+  letting finished results pile up behind it.
+- A restart still ends an unfinished job, but the rows it wrote stay readable as long as its
+  record does, and their positions say which URLs to submit again. The service does not
+  resume jobs itself; that was decided, not left out.
+- A result that cannot be stored fails the job and cancels its remaining URLs, naming the
+  error. A progress save that fails still does not, the rule `B08` set.
+
+Two orderings carry the contract, and both are tested: the record is read before the rows,
+so a page that reports the job ended holds every row; and a page ends at the first missing
+row rather than at the saved count, which trails the rows by up to two seconds and, after a
+crash, for good.
+
+### Fixed - a job id is only what the service hands out
+
+`GET /jobs/{job_id}` accepted any string up to 64 characters, and the id becomes part of a
+state-store key. With rows stored under the job's key, `/jobs/abc:row:0` would have read a
+row as if it were a job record and answered 500. An id is now what `secrets.token_urlsafe`
+produces, `[A-Za-z0-9_-]` up to 64 characters; anything else answers 422.
+
+Every new test was also run against its feature broken at the root - results retained, the
+lock removed, delivery moved out of the slot, the page bounded by the saved count - and
+failed each time. [The plan](docs/plans/2026-09-23-job-result-rows.md) records the design,
+the two decisions and where the work departed from it.
+
 ## 2.3.1 - 2026-09-22
 
 ### Fixed - the published schema still named the limit 2.3.0 had made a setting
