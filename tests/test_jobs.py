@@ -432,3 +432,29 @@ async def test_a_reader_sees_every_finished_row_before_the_count_is_saved(jobs_a
         hold.set()
     assert status["progress"]["done"] == 0, "the throttle was meant to hold the saved count back"
     assert sorted(row["position"] for row in rows) == [0, 1]
+
+
+async def test_a_finished_job_s_rows_expire_with_its_record(jobs_api):
+    """A row's expiry is set when it is written, counted from the job's deadline. Left
+    there, the rows of a job that ended early would stay on disk long after their record,
+    and a job that ran past its deadline would lose its first rows before its record - an
+    empty first page from a job that says done."""
+    async with jobs_api() as (client, resources):
+        urls = [f"https://example.com/{n}" for n in range(3)]
+        job = (await client.post("/jobs", json={"urls": urls, "timeout_ms": 600_000})).json()
+        await finished(client, job["status_url"])
+        record_expires = resources.state.get(KEY + job["job_id"], expire_time=True)[1]
+        rows_expire = [resources.state.get(_row_key(job["job_id"], n), expire_time=True)[1] for n in range(3)]
+    assert all(abs(expires - record_expires) < 1 for expires in rows_expire), (record_expires, rows_expire)
+
+
+async def test_an_interrupted_job_s_rows_expire_with_its_record(jobs_api):
+    urls = ["https://example.com/a", "https://example.com/b", "https://example.com/held"]
+    async with jobs_api(hold=asyncio.Event()) as (client, resources):
+        body = {"urls": urls, "max_concurrency": 1, "timeout_ms": 600_000}
+        job = (await client.post("/jobs", json=body)).json()
+        await rows_stored(resources, job["job_id"], 2)
+    async with jobs_api() as (_, resources):  # the next process, on the same store
+        record_expires = resources.state.get(KEY + job["job_id"], expire_time=True)[1]
+        rows_expire = [resources.state.get(_row_key(job["job_id"], n), expire_time=True)[1] for n in range(2)]
+    assert all(abs(expires - record_expires) < 1 for expires in rows_expire), (record_expires, rows_expire)

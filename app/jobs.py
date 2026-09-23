@@ -102,7 +102,7 @@ class JobRunner:
             record = await self.resources.io(self.resources.state.get, KEY + job_id)
             if record and record["status"] in UNFINISHED:
                 record.update(status="failed", error="Interrupted: the service shut down", finished_at=_now())
-                await self._save(job_id, record)
+                await self._settle(job_id, record)
 
     async def _run(self, job_id, record, urls, options, max_concurrency):
         record["status"] = "running"
@@ -139,11 +139,30 @@ class JobRunner:
             logger.error("Job failed ({})", type(exc).__name__)
             record.update(status="failed", error=f"Job failed ({type(exc).__name__})")
         record["finished_at"] = _now()
-        await self._save(job_id, record)
+        await self._settle(job_id, record)
 
     async def _write_row(self, job_id, seq, row, keep):
         """Not caught: a result that cannot be stored fails the job."""
         await self.resources.io(self.resources.state.set, _row_key(job_id, seq), row, expire=keep)
+
+    async def _settle(self, job_id, record):
+        """Save the record of a job that has ended, and let its rows expire with it.
+
+        A row's expiry was set when it was written, from the job's deadline. The rows of a job
+        that ended early would otherwise stay on disk long after their record, and those of
+        one that ran past its deadline would expire first - an empty first page from a job
+        that says done. Record and rows get one absolute expiry, and the record is written
+        last, so one that says the job ended finds its rows already settled."""
+        state = self.resources.state
+        until = time.time() + self._keep(record)
+
+        def settle():
+            seq = 0
+            while state.touch(_row_key(job_id, seq), expire=until - time.time()):
+                seq += 1
+            state.set(KEY + job_id, record, expire=until - time.time())
+
+        await self.resources.io(settle)
 
     def _keep(self, record):
         """Seconds a record or row stays. Unfinished work outlives its deadline long enough to
