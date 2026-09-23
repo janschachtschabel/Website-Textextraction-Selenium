@@ -345,7 +345,8 @@ def _job_routes(application, config, admit, check_auth):
         Rows come in the order the URLs finished; `position` names the URL of the request.
         Start at `offset=0` and pass each page's `next_offset` on. An empty page from a job
         that is still running means nothing new yet; from one that has ended, nothing more.
-        A page holds at most `limit` results of up to `max_bytes` each. Answers 404 when
+        A row's Markdown is bounded by `max_bytes`, a screenshot only by its pixel limits,
+        so a job that takes screenshots is best read with a small `limit`. Answers 404 when
         the id is unknown or its record has expired."""
         record, rows = await application.state.resources.jobs.rows(job_id, offset, limit)
         if record is None:

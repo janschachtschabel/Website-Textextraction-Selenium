@@ -414,9 +414,10 @@ class JobAccepted(BaseModel):
 
 
 class JobProgress(BaseModel):
-    """How far a running job has got. Counts, not per-URL results: those arrive with the
-    finished batch. Written periodically rather than per URL, so it can lag slightly
-    behind; the last write of a finished job always carries the final count."""
+    """How far a job has got: counts, while it runs and after; the results themselves are
+    read from results_url. Saved at most every two seconds, so it can trail the rows. A job
+    that ends by itself saves its exact count; one ended by a shutdown or a lost process
+    can report fewer URLs than it stored."""
 
     done: int = Field(description="URLs finished, whether they succeeded or not")
     succeeded: int = Field(description="Of those, how many produced a result")

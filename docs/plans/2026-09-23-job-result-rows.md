@@ -1212,4 +1212,22 @@ above:
   `JOB_RESULT_TTL`. A graceful shutdown saves the record as finished, so it expires
   `JOB_RESULT_TTL` after the shutdown, and the route answers 404 from then on. The
   documents say what holds in every case: the rows stay readable as long as the record does.
-
+- **Review.** A review with fresh context found nothing critical or major and six minor
+  points, all fixed on the branch. Two properties had no test: the results route's key
+  check, and reading the record before the rows - swapping the two reads left all 120 job
+  tests green. Rows expired on the deadline's schedule rather than the record's: hours of
+  disk after an early end, and the first rows gone before the record after a late one.
+  Both ends of a job now touch every row to the record's expiry. Three texts said more
+  than the code backs: the progress count after a shutdown, the verdict "lost", and
+  `max_bytes` for screenshots. The single storage thread that record ordering depends on
+  is now commented. The review's one open question - whether the numbering test sees a
+  missing lock without the delay the red-proof had added - was settled by experiment:
+  lock removed, no delay, 20 of 20 runs failed.
+- **End to end.** One 2000-URL job in fast mode against a local upstream, 29.7 KB of
+  Markdown a page, in the real images: 3.0.0 served its first row after 6.4 seconds and all
+  2000 through the documented loop. Container memory grew by 136 MiB against 175 MiB for
+  2.3.1 - not flat, as the verification plan expected. The difference is smaller than the
+  ~60 MB of Markdown 2.3.1 holds by design, so the container figure is dominated by what
+  both versions share. diskcache maps each store file with up to 64 MiB and caches up to
+  32 MiB per connection, which fits the size but was not measured. The bound on result
+  objects rests on the gc test; the container-level claim is open.

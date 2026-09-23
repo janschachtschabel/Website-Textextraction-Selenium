@@ -376,14 +376,17 @@ curl "http://127.0.0.1:8000/jobs/<job_id>/results?offset=0&limit=100" -H "Author
 ```
 
 While it runs, the poll carries `progress`: `done`, `succeeded` and `total`. It is saved
-at most every two seconds, and the final save always carries the last count.
+at most every two seconds. A job that ends by itself saves its exact count; one ended by a
+shutdown or a lost process can report fewer URLs than it stored, so count its rows.
 
 Each URL is stored as a row the moment it finishes. `GET /jobs/{job_id}/results` pages
 through them: start at `offset=0` and pass each page's `next_offset` on; `limit` is 20 by
-default and 100 at most. Rows come in the order the URLs finished, and each names its
-`position` in the request. An empty page from a job that is still running means nothing
-new yet; from one that has ended, nothing more. A job holds at most `max_concurrency`
-results in memory, however long its list:
+default and 100 at most - keep it small for jobs that take screenshots, which `max_bytes`
+does not bound. Rows come in the order the URLs finished, and each names its `position` in
+the request. An empty page from a job that is still running means nothing new yet; from
+one that has ended, nothing more. The exception is a job reported lost: that verdict comes
+from the clock, and a process that stalled rather than stopped can still add rows. A job
+holds at most `max_concurrency` results in memory, however long its list:
 
 ```python
 import time

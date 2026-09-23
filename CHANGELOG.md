@@ -28,6 +28,8 @@ process. Nothing could be read before the last URL finished, and a container res
 - A restart still ends an unfinished job, but the rows it wrote stay readable as long as its
   record does, and their positions say which URLs to submit again. The service does not
   resume jobs itself; that was decided, not left out.
+- A job's rows expire with its record however the job ends, so they hold disk no longer
+  than the single record did.
 - A result that cannot be stored fails the job and cancels its remaining URLs, naming the
   error. A progress save that fails still does not, the rule `B08` set.
 

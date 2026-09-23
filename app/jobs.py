@@ -74,7 +74,11 @@ class JobRunner:
         written, so the rows read after a record that says so are complete, and an empty
         page then means the end. The page stops at the first row that does not exist rather
         than at the record's count: that is saved at most every PROGRESS_EVERY_SECONDS, and
-        after a crash it trails the rows for good."""
+        after a crash it trails the rows for good.
+
+        That holds for an end the record states. A job reported lost is inferred from the
+        clock (see status), and a process that stalled rather than stopped can still add rows
+        to it."""
         record = await self.status(job_id)
         if record is None:
             return None, []

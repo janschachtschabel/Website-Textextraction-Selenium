@@ -17,7 +17,9 @@ they read `result` from `GET /jobs/{job_id}`.
 
 Page through `results_url` instead of reading `result.results`, passing each page's
 `next_offset` on. An empty page from a job that has ended means there is nothing more; from
-one that is still running, that nothing new has finished yet:
+one that is still running, that nothing new has finished yet. A job reported lost is the
+exception - that verdict comes from the clock, and a stalled process can still add rows -
+so read it once more before resubmitting what is missing:
 
 ```python
 import time

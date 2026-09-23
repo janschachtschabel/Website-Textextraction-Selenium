@@ -75,6 +75,9 @@ class Resources:
         self.stack = AsyncExitStack()
         await self.stack.__aenter__()
         try:
+            # One thread, and that is load-bearing: a store write keeps running after the task
+            # that awaited it is cancelled, and a job's final record must land after any such
+            # write. With more threads a late progress save could overwrite it.
             self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="extraction-storage")
             self.stack.callback(self.executor.shutdown, True)  # registered first: shuts down last
             await self.io(self._open_stores)
