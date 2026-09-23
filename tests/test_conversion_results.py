@@ -2,8 +2,10 @@ import json
 import time
 
 import pytest
+from bs4 import BeautifulSoup
 
 from app.converter import convert_document
+from app.html_converter import document_links
 
 
 def test_empty_and_unknown_binary_are_not_successful():
@@ -29,6 +31,101 @@ def test_kmap_inline_attachment_uses_final_origin():
     html = '<base href="/app/"><script id="embedded-topic" type="json">' + json.dumps(payload) + "</script>"
     result = convert_document(html.encode(), "text/html", "https://school.example/topic/42")
     assert "https://school.example/app/files/diagram.pdf" in result.markdown
+
+
+# A worksheet post as kindOERgarten and Planet-N publish them: the material is the list of files.
+WORKSHEET_POST = """<html lang="de"><head><title>Äpfel zählen</title></head><body>
+<header><nav><a href="/">Start</a> <a href="/programm.pdf">Jahresprogramm</a></nav></header>
+<article><h1>Äpfel zählen: 1 bis 3</h1><div class="entry-content">
+<p>Auch mit Äpfeln lässt sich das Zählen üben. Hier für die Zahlen bis 3.</p>
+<ul>
+<li><a href="/uploads/aepfel-sw.pdf">Arbeitsblatt: Äpfel am Apfelbaum zählen – schwarz-weiß</a></li>
+<li><a href="/uploads/aepfel-bunt.PDF">Arbeitsblatt: Äpfel am Apfelbaum zählen – bunt</a></li>
+<li><a href="/uploads/loesungen.pdf"><img src="/icon.png" alt=""></a></li>
+</ul>
+<p>Quelle: Kita-Archiv<span style="display: none"><a href="/archiv/aepfel-2016.pdf">@1</a></span></p>
+<p hidden><a href="/uploads/entwurf.pdf">Entwurf</a></p>
+</div>
+<div class="related"><h3>Ähnliche Beiträge</h3>
+<p><a href="/birnen/">Birnen zählen bis 5</a> In "Bildungsbereich"</p></div>
+</article>
+<aside><a href="/flyer.pdf">Flyer</a></aside>
+<footer><a href="/datenschutz.pdf">Datenschutz</a></footer>
+</body></html>"""
+
+
+def test_document_links_in_the_content_survive_the_extraction():
+    result = convert_document(WORKSHEET_POST.encode(), "text/html; charset=utf-8", "https://kita.example/2017/aepfel/")
+    text, files = result.markdown.rsplit("\n\n---\n\n", 1)
+    worksheet = "- [Arbeitsblatt: Äpfel am Apfelbaum zählen – {}](https://kita.example/uploads/{})"
+    assert files.splitlines() == [
+        worksheet.format("schwarz-weiß", "aepfel-sw.pdf"),
+        worksheet.format("bunt", "aepfel-bunt.PDF"),
+        "- [loesungen.pdf](https://kita.example/uploads/loesungen.pdf)",
+    ]
+    assert "Auch mit Äpfeln" in text
+
+
+def test_a_document_link_the_text_keeps_is_not_repeated(article_html):
+    handout = '<p>Das <a href="/files/handout.pdf">Handout</a> fasst den Versuch zusammen und nennt das Material.</p>'
+    html = article_html.replace("</main>", handout + "</main>")
+    result = convert_document(html.encode(), "text/html", "https://school.example/optics")
+    assert result.markdown.count("https://school.example/files/handout.pdf") == 1
+    assert "\n---\n" not in result.markdown  # kept by the text, not added after it
+
+
+@pytest.mark.parametrize(
+    ("context", "counted"),
+    [
+        ("<p>{}</p>", True),
+        ("<nav>{}</nav>", False),
+        ("<header>{}</header>", False),
+        ("<footer>{}</footer>", False),
+        ("<aside>{}</aside>", False),
+        ("<main><aside>{}</aside></main>", False),
+        ('<div role="navigation">{}</div>', False),
+        ('<div role="banner">{}</div>', False),
+        ('<div role="contentinfo">{}</div>', False),
+        ('<div role="complementary">{}</div>', False),
+        ("<p hidden>{}</p>", False),
+        ('<p aria-hidden="true">{}</p>', False),
+        ('<p style="display:none">{}</p>', False),
+        ('<p style="visibility: hidden">{}</p>', False),
+        # An article's or section's own header, footer and aside belong to its content.
+        ("<article><header>{}</header></article>", True),
+        ("<article><footer>{}</footer></article>", True),
+        ("<section><footer>{}</footer></section>", True),
+        ("<main><header>{}</header></main>", True),
+        ("<article><aside>{}</aside></article>", True),
+        ('<div hidden="until-found">{}</div>', True),
+    ],
+)
+def test_a_file_counts_where_the_page_shows_its_content(context, counted):
+    html = "<body><article><p>Text</p></article>" + context.format('<a href="https://s.example/a.pdf">A</a>')
+    assert (document_links(BeautifulSoup(html + "</body>", "lxml")) == [("A", "https://s.example/a.pdf")]) is counted
+
+
+def test_a_file_link_without_text_is_labelled_by_aria_label_title_or_file_name():
+    html = (
+        '<a href="https://s.example/a.pdf" aria-label="Lösungen"><img src="i.png" alt=""></a>'
+        '<a href="https://s.example/b.pdf" title="Arbeitsblatt\n\n  bunt"></a>'
+        '<a href="https://s.example/c%20d.pdf"> </a>'
+    )
+    assert document_links(BeautifulSoup(html, "lxml")) == [
+        ("Lösungen", "https://s.example/a.pdf"),
+        ("Arbeitsblatt bunt", "https://s.example/b.pdf"),
+        ("c d.pdf", "https://s.example/c%20d.pdf"),
+    ]
+
+
+def test_a_file_is_what_links_reports_as_a_download():
+    html = (
+        '<a href=" https://s.example/blatt.pdf ">Blatt</a>'  # browsers ignore the spaces
+        '<a href="https://s.example/blatt.pdf/">Seite</a>'  # a page named like a file
+        '<a href="https://s.example/get?file=blatt.pdf">Abruf</a>'
+        '<a href="mailto:post@s.example?subject=blatt.pdf">Post</a>'
+    )
+    assert document_links(BeautifulSoup(html, "lxml")) == [("Blatt", "https://s.example/blatt.pdf")]
 
 
 def test_a_youtube_watch_page_yields_its_title_channel_and_description(youtube_watch_page):

@@ -4,17 +4,22 @@ import io
 import re
 import threading
 from copy import copy
-from urllib.parse import urljoin
+from urllib.parse import unquote, urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 from trafilatura import extract, html2txt
 
 from .embedded_content import embedded_html
-from .markup import enhance_table_structure, prepare_html
+from .links import DOWNLOAD_EXTS
+from .markup import HIDDEN_STYLE, enhance_table_structure, prepare_html
 from .results import ConversionResult
 
 _local = threading.local()
 _HIDDEN_CLASSES = {"sr-only", "visually-hidden", "visuallyhidden", "screen-reader-text", "hidden"}
+# A file linked from the page's navigation, banner, footer or sidebar is the site's, not the page's.
+_CHROME_ROLES = {"navigation", "banner", "contentinfo", "complementary"}
+_SECTIONING = ["article", "aside", "main", "nav", "section"]
+_FILE_EXTENSIONS = tuple(DOWNLOAD_EXTS)
 
 
 def markitdown_stream(data: bytes, content_type: str | None, extension: str, url: str | None) -> str:
@@ -54,6 +59,55 @@ def with_heading(text: str | None, heading: str) -> str | None:
     if text and heading and not text.lstrip().startswith("# ") and _compact(heading) not in _compact(text):
         return f"# {heading}\n\n{text}"
     return text
+
+
+def _outside_content(tag) -> bool:
+    """Hidden from readers - as Wikipedia's archive placeholders are - or a landmark around the
+    page's content, as browsers map them: a header or footer is the page's only outside article,
+    aside, main, nav and section, and an aside is a sidebar only outside article and section."""
+    hidden = (
+        tag.get("hidden") not in (None, "until-found")
+        or str(tag.get("aria-hidden", "")).lower() == "true"
+        or bool(HIDDEN_STYLE.search(tag.get("style", "")))
+    )
+    if hidden or tag.name == "nav" or tag.get("role") in _CHROME_ROLES:
+        return True
+    if tag.name in {"header", "footer"}:
+        return tag.find_parent(_SECTIONING) is None
+    if tag.name == "aside":
+        return tag.find_parent(["article", "section"]) is None
+    return False
+
+
+def document_links(soup: BeautifulSoup) -> list[tuple[str, str]]:
+    """Label and URL of each file the page's content links to, in page order: an http(s) link whose
+    path ends in one of DOWNLOAD_EXTS, which `links` reports as a download.
+
+    Expects the prepared document, whose references are already absolute. A link without text is
+    labelled with its aria-label, its title or its file name."""
+    found = {}
+    for anchor in soup.find_all("a", href=True):
+        url = anchor["href"].strip()
+        parts = urlsplit(url)
+        if url in found or parts.scheme not in {"http", "https"} or not parts.path.lower().endswith(_FILE_EXTENSIONS):
+            continue
+        if _outside_content(anchor) or anchor.find_parent(_outside_content):
+            continue
+        label = anchor.get_text(" ", strip=True) or anchor.get("aria-label", "") or anchor.get("title", "")
+        found[url] = " ".join(label.split()) or unquote(parts.path.rsplit("/", 1)[-1])
+    return [(label, url) for url, label in found.items()]
+
+
+def with_documents(text: str, documents: list[tuple[str, str]]) -> str:
+    # Trafilatura drops a list that holds nothing but links, as navigation. On a worksheet page
+    # that list is the material, so the files the content links to and the text lacks follow it.
+    missing = []
+    for label, url in documents:
+        if url not in text:
+            label = label.replace("[", r"\[").replace("]", r"\]")
+            target = url.replace(" ", "%20").replace("(", "%28").replace(")", "%29")
+            missing.append(f"- [{label}]({target})")
+    return text + "\n\n---\n\n" + "\n".join(missing) if missing else text
 
 
 def _prepared(data: bytes, content_type: str | None, url: str | None, converter: str):
@@ -117,5 +171,8 @@ def convert_html(
             warnings.append(f"{candidate} failed ({type(exc).__name__}); trying fallback")
             continue
         if text and text.strip():
-            return ConversionResult(enhance_table_structure(text.strip()), candidate, "ok", warnings)
+            text = text.strip()
+            if candidate == "trafilatura" and clean:
+                text = with_documents(text, document_links(soup))
+            return ConversionResult(enhance_table_structure(text), candidate, "ok", warnings)
     return ConversionResult(status="failed", warnings=warnings or ["No converter produced text"])

@@ -264,8 +264,9 @@ class CrawlOptions(BaseModel):
     trafilatura_clean_markdown: bool | None = Field(
         None,
         description="With trafilatura: true extracts the article as Markdown, with its links and "
-        "tables and without navigation, headers or comments; false returns the whole page as plain "
-        "text. The other converters ignore it. Default: TRAFILATURA_CLEAN_MARKDOWN, true",
+        "tables and without navigation, headers or comments, and lists the files its content links to "
+        "that the text lacks after a --- line; false returns the whole page as plain text. The other "
+        "converters ignore it. Default: TRAFILATURA_CLEAN_MARKDOWN, true",
     )
     media_conversion_policy: Literal["skip", "metadata", "full", "none"] | None = Field(
         None,
@@ -507,9 +508,10 @@ class CrawlResponse(BaseModel):
     redirected: bool = Field(description="True when final_url differs from requested_url")
     content_type: str | None = Field(description="Content-Type the site declared, such as text/html; charset=utf-8")
     markdown: str = Field(
-        description="The extracted text as Markdown; plain text with trafilatura_clean_markdown=false. With "
-        "anonymize, personal data is replaced by placeholders such as <PERSON>. Empty when nothing was "
-        "extracted"
+        description="The extracted text as Markdown; plain text with trafilatura_clean_markdown=false. "
+        "Trafilatura's text is followed by a --- line and the files the content links to, when the text "
+        "lacks them. With anonymize, personal data is replaced by placeholders such as <PERSON>. Empty "
+        "when nothing was extracted"
     )
     markdown_length: int = Field(description="Characters in markdown")
     word_count: int = Field(description="Words in markdown, counted between whitespace")

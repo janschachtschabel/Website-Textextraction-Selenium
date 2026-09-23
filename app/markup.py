@@ -50,7 +50,7 @@ def enhance_table_structure(text: str) -> str:
     return "\n".join(result)
 
 
-_HIDDEN = re.compile(r"display\s*:\s*none|visibility\s*:\s*hidden", re.I)
+HIDDEN_STYLE = re.compile(r"display\s*:\s*none|visibility\s*:\s*hidden", re.I)
 
 
 def _presentation(equation) -> str:
@@ -75,7 +75,7 @@ def _reveal(replacement):
             return
         if parent.get_text(" ", strip=True) != formula:
             return
-        if _HIDDEN.search(parent.get("style", "")):
+        if HIDDEN_STYLE.search(parent.get("style", "")):
             del parent["style"]
         for attribute in ("aria-hidden", "hidden"):
             parent.attrs.pop(attribute, None)

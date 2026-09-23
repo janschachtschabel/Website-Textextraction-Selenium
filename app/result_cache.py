@@ -6,7 +6,7 @@ import json
 from .config import Settings
 from .schemas import CrawlOptions
 
-CACHE_VERSION = "extraction-v5"
+CACHE_VERSION = "extraction-v6"
 
 
 def make_cache_key(url: str, options: CrawlOptions, config: Settings) -> str:

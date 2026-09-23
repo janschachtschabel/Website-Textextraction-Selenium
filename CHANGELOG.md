@@ -3,6 +3,23 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
+## Unreleased
+
+### Fixed - the files a page is about stay in its text
+
+Trafilatura drops a list that holds nothing but links, as navigation. On a worksheet page that
+list is the material: on 6 of the 94 pages of the source run the text lost the files its page
+links to - both kindOERgarten posts their worksheets, both Planet-N modules their PDF, two
+Science in School articles a worksheet and the article as PDF.
+
+- After Trafilatura's text, the files the content links to that the text lacks follow a `---`
+  line, one `- [label](url)` each: links whose path ends in an extension that `links` reports
+  as `download`, outside the page's navigation, header, footer and sidebar - an article's own
+  header, footer or aside counts as content - and not hidden.
+- The listed files count as extracted text, so also toward auto's 500 visible characters; on
+  the run's 94 pages no page changed between HTTP and Chrome.
+- The result cache moves to `extraction-v6`.
+
 ## 3.2.0 - 2026-09-23
 
 Measured on two material pages each from 46 of WLO's largest OER sources, 94 pages in all:

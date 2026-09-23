@@ -441,6 +441,12 @@ it can be pasted into an editor that only understands that form.
   output starts with the page's first visible `<h1>`, also when it sits outside
   the main content, unless it already starts with a heading. For overview pages
   with little running text, `markitdown` keeps more, including navigation.
+  With `trafilatura_clean_markdown` (the default), files the content links to - the
+  extensions `links` reports as `download`, such as PDF and office documents - follow
+  Trafilatura's text after a `---` line when the text lacks them, one `- [label](url)`
+  each. Links in the page's navigation, header, footer or sidebar and in hidden elements
+  do not count; an article's own header, footer or aside does. The list counts as
+  extracted text, also for `auto`'s 500 visible characters.
 - `trafilatura_clean_markdown=false`: Trafilatura's raw text extraction.
 - `max_bytes`: bounds decoded HTTP output and rendered HTML; truncation is explicit.
   Compressed HTTP input is decoded with a bounded output allocation. For Chrome,
