@@ -268,11 +268,11 @@ def test_image_alt_text_is_not_visible_content_for_that_shortcut():
     assert needs_browser(shell, alt_only) is True
 
 
-def routed(html, status=200):
+def routed(html, status=200, url="https://example.com/page"):
     """The routing answer for what the HTTP path really extracts from this page."""
     data = html.encode()
-    fetched = FetchResult(data, "https://example.com/page", status, "text/html; charset=utf-8")
-    return needs_browser(fetched, convert_document(data, "text/html; charset=utf-8", "https://example.com/page"))
+    fetched = FetchResult(data, url, status, "text/html; charset=utf-8")
+    return needs_browser(fetched, convert_document(data, "text/html; charset=utf-8", url))
 
 
 def shell(title, body):
@@ -367,3 +367,11 @@ def test_a_thin_extraction_from_a_page_that_runs_javascript_is_rendered(html, st
 )
 def test_enough_text_no_javascript_or_a_plain_error_answer_stays_on_http(html, status):
     assert routed(html, status) is False
+
+
+def test_a_page_that_carries_its_content_as_data_stays_on_http(youtube_watch_page):
+    # A fresh browser meets YouTube's consent page in the EU; the watch page's own data holds the text.
+    short_lesson = {"topic": "Symmetrie", "description": "<p>Kurz erklärt.</p>", "attachments": []}
+    kmap = shell("KMap", '<kmap-main></kmap-main><script id="embedded-topic" type="json">' + json.dumps(short_lesson))
+    assert routed(youtube_watch_page("Kurz."), 200, "https://www.youtube.com/watch?v=VhCv6MlgWlE") is False
+    assert routed(kmap + '</script><script src="/app/kmap.js" type="module"></script>', 200) is False

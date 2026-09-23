@@ -4,6 +4,7 @@ import re
 
 from bs4 import BeautifulSoup
 
+from .embedded_content import embedded_html
 from .markup import decode_text
 from .results import ConversionResult, FetchResult
 
@@ -68,4 +69,9 @@ def needs_browser(fetched: FetchResult, converted: ConversionResult) -> bool:
     # This much extracted text answers the question without parsing the document again.
     if converted.status == "ok" and visible_length(converted.markdown) >= THIN_TEXT_LIMIT:
         return False
-    return _runs_javascript(BeautifulSoup(decode_text(fetched.data, fetched.content_type), "lxml"))
+    soup = BeautifulSoup(decode_text(fetched.data, fetched.content_type), "lxml")
+    # A page that carries its content as data - a KMap lesson, a YouTube video - shows a browser
+    # no more of it; YouTube shows a fresh browser its consent page instead.
+    if embedded_html(soup, fetched.final_url):
+        return False
+    return _runs_javascript(soup)
