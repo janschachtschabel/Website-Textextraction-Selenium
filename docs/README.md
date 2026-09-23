@@ -32,6 +32,8 @@ Two kinds of entry are worth knowing about before reading them:
 - [migration-0.3.md](migration-0.3.md) - what a caller of the pre-audit code has to change.
 - [plans/2026-09-15-audit-remediation.md](plans/2026-09-15-audit-remediation.md) - the plan
   the first remediation was worked against.
+- [plans/2026-09-23-job-result-rows.md](plans/2026-09-23-job-result-rows.md) - the plan for
+  storing each job result as a row (3.0.0), with the two decisions it rests on.
 
 ## Where the other answers live
 
