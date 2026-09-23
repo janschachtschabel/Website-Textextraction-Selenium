@@ -35,7 +35,16 @@ dependencies = [
 
 [project.optional-dependencies]
 documents = ["markitdown[pdf,docx,pptx,xls,xlsx,outlook]>=0.1.7,<0.2"]
-pii = ["presidio-analyzer>=2.2.0,<3", "presidio-anonymizer>=2.2.0,<3", "spacy>=3.7.0,<4"]
+# The models are wheels on explosion/spacy-models, not on PyPI, so they are named by URL; the
+# lockfile pins each by hash like any other artefact. md: nearly lg's entity recognition at a
+# tenth of the size (de 42 MiB, en 31 MiB).
+pii = [
+    "presidio-analyzer>=2.2.0,<3",
+    "presidio-anonymizer>=2.2.0,<3",
+    "spacy>=3.7.0,<4",
+    "de-core-news-md @ https://github.com/explosion/spacy-models/releases/download/de_core_news_md-3.8.0/de_core_news_md-3.8.0-py3-none-any.whl",
+    "en-core-web-md @ https://github.com/explosion/spacy-models/releases/download/en_core_web_md-3.8.0/en_core_web_md-3.8.0-py3-none-any.whl",
+]
 dev = [
     "ruff>=0.11.0,<1",
     "pytest>=8.3.0,<10",
@@ -50,6 +59,11 @@ loadtest = ["aiohttp>=3.9.0,<4", "matplotlib>=3.9.0,<4", "numpy>=1.26.0,<3"]
 
 [tool.hatch.version]
 path = "app/__init__.py"
+
+# The pii extra names the spaCy models by URL; the project is not published to PyPI,
+# which would refuse such references.
+[tool.hatch.metadata]
+allow-direct-references = true
 
 # ---------------------------------------------------------------------------
 # Package discovery

@@ -107,8 +107,8 @@ class Settings:
     revalidation_ttl: int = int(os.getenv("REVALIDATION_TTL", "86400"))
     global_rate_limit_rps: float = float(os.getenv("GLOBAL_RATE_LIMIT_RPS", "0"))
     default_domain_rate_limit_rps: float = float(os.getenv("DEFAULT_DOMAIN_RATE_LIMIT_RPS", "0"))
-    presidio_de_model: str = os.getenv("PRESIDIO_DE_MODEL", "de_core_news_lg")
-    presidio_en_model: str = os.getenv("PRESIDIO_EN_MODEL", "en_core_web_lg")
+    presidio_de_model: str = os.getenv("PRESIDIO_DE_MODEL", "de_core_news_md")  # the pii extra installs these
+    presidio_en_model: str = os.getenv("PRESIDIO_EN_MODEL", "en_core_web_md")
     uvicorn_workers: int = int(os.getenv("UVICORN_WORKERS", "1"))
     max_request_bytes: int = int(os.getenv("MAX_REQUEST_BYTES", str(1024 * 1024)))
     inbound_rate_limit_rps: float = float(os.getenv("INBOUND_RATE_LIMIT_RPS", "0"))

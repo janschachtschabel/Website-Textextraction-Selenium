@@ -261,12 +261,15 @@ takes several minutes.
 docker run --rm -v "$PWD:/src:ro" -w /work python:3.13-slim-trixie sh -c '
   pip install -q pip-tools >&2
   mkdir -p app && cp /src/pyproject.toml /src/README.md /src/LICENSE . && cp /src/app/__init__.py app/
-  pip-compile -q --generate-hashes --strip-extras --extra documents -o out.lock pyproject.toml >&2
+  pip-compile -q --generate-hashes --allow-unsafe --strip-extras --extra documents --extra pii -o out.lock pyproject.toml >&2
   cat out.lock' > new.lock && mv new.lock requirements.lock
 ```
 
 The copies of `README.md`, `LICENSE` and `app/__init__.py` are there because the project
-metadata declares them. Afterwards rebuild the image and run the suites; a dependency the
+metadata declares them. `--allow-unsafe` pins `setuptools` as well, which spaCy's stack
+needs and the image's venv does not bring. This resolves every version afresh. To add a dependency without
+moving the others, also copy the current lockfile in first (`cp /src/requirements.lock
+out.lock`): pip-compile keeps the pins it finds there. Afterwards rebuild the image and run the suites; a dependency the
 lock misses fails the build rather than the deployment, because `--require-hashes` refuses
 to install anything the file does not name.
 

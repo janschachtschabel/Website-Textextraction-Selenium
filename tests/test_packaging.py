@@ -29,25 +29,27 @@ def test_the_image_pins_a_python_the_metadata_allows():
 
 
 def requirements(text):
-    """Requirement lines of a pip-compile lockfile, with the hashes that follow each."""
+    """Requirement lines of a pip-compile lockfile, with the hashes that follow each: a pinned
+    version, or a direct reference such as a spaCy model wheel (name @ url)."""
     joined = text.replace(chr(92) + chr(10), " ")  # a backslash at end of line continues it
     found = {}
     for line in joined.splitlines():
         line = line.split("#")[0].strip()
-        match = re.match(r"^([A-Za-z0-9._-]+)(?:\[[^\]]*\])?==", line)
+        match = re.match(r"^([A-Za-z0-9._-]+)(?:\[[^\]]*\])?(?:==| @ )", line)
         if match:
             found[match.group(1).lower().replace("_", "-")] = re.findall(r"--hash=sha256:[0-9a-f]{64}", line)
     return found
 
 
 def declared():
-    """Direct dependencies of the project and of the extra the image installs.
+    """Direct dependencies of the project and of the extras the image installs.
 
     Read with tomllib rather than a regex: the lists hold extras of their own, so
     "uvicorn[standard]" ends a naive bracket match after the second entry.
     """
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text("utf-8"))["project"]
-    specs = metadata["dependencies"] + metadata["optional-dependencies"]["documents"]
+    extras = metadata["optional-dependencies"]
+    specs = metadata["dependencies"] + extras["documents"] + extras["pii"]
     return {re.match(r"[A-Za-z0-9._-]+", spec).group(0).lower().replace("_", "-") for spec in specs}
 
 
@@ -65,6 +67,23 @@ def test_the_image_installs_from_the_lockfile_and_checks_the_hashes():
     dockerfile = (ROOT / "Dockerfile").read_text("utf-8")
     assert "requirements.lock" in dockerfile, "the image resolves its own versions instead"
     assert "--require-hashes" in dockerfile, "a lockfile whose hashes are not checked proves nothing"
+
+
+def test_the_default_anonymization_models_are_the_ones_the_image_installs():
+    """anonymize loads the model a setting names and never downloads one: a default the image
+    lacks answers every anonymized request with 503, as 3.0.0 did."""
+    config = (ROOT / "app/config.py").read_text("utf-8")
+    defaults = re.findall(r'os\.getenv\("PRESIDIO_(?:DE|EN)_MODEL", "([A-Za-z0-9_]+)"\)', config)
+    locked = requirements((ROOT / "requirements.lock").read_text("utf-8"))
+    assert len(defaults) == 2, f"expected a German and an English default, found {defaults}"
+    missing = sorted(model for model in defaults if model.replace("_", "-") not in locked)
+    assert not missing, f"the image does not install the default models {missing}"
+
+
+def test_the_image_ships_ffprobe_for_media_metadata():
+    """media_conversion_policy=metadata runs ffprobe; without it the answer is failed."""
+    installs = re.findall(r"apt-get install [^\n]*", (ROOT / "Dockerfile").read_text("utf-8"))
+    assert any(re.search(r"\bffmpeg\b", line) for line in installs), "Debian ships ffprobe in its ffmpeg package"
 
 
 def settings_the_service_reads():

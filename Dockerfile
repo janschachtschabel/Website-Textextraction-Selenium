@@ -22,7 +22,7 @@ FROM python:3.13-slim-trixie
 # chromium-sandbox carries the SUID helper Debian splits out of the browser package. It is
 # installed so an operator can choose Chrome's own sandbox; see SELENIUM_NO_SANDBOX below.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends chromium chromium-driver chromium-sandbox \
+    && apt-get install -y --no-install-recommends chromium chromium-driver chromium-sandbox ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # The service renders pages it does not trust, so it does not run as root.
