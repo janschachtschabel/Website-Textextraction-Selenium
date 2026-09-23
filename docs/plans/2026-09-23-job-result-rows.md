@@ -235,7 +235,7 @@ installed FastAPI: verified on 0.141.1, two routes sharing one `Annotated` alias
 |---|---|
 | Clients that read `result` break | 3.0.0 with `docs/migration-3.0.md`; publishing waits until the client is migrated or the panel pins `2.3.1` (see Release) |
 | Results of jobs that finished shortly before the upgrade become unreachable | Migration note: collect them before upgrading. They expire within `JOB_RESULT_TTL` anyway |
-| Cancelling pending URLs interrupts browser work | It is the path an expiring deadline already takes, and B01/B06 made it clean up. Task 1's stop test runs it |
+| Cancelling pending URLs interrupts browser work | It is the path an expiring deadline already takes, and B01/B06 made it clean up. Task 1's stop test runs it. Fixed in the second review: it also failed the requests that had joined those URLs, which now go again on their own (see Implementation notes) |
 | The gc-based memory test counts nothing on some runtime and passes vacuously | Its red-proof retains every item and must see the count rise. If it does not rise, the test is broken, and that is a finding |
 | A reader implemented rows-first would end one page early | `rows()` reads the record first and says why in its docstring; review item |
 | Rows of a job that finishes early outlive its record until the original deadline plus the TTL | Fixed in review: both ends of a job touch every row to the record's expiry (see Implementation notes) |
@@ -1224,6 +1224,13 @@ above:
   is now commented. The review's one open question - whether the numbering test sees a
   missing lock without the delay the red-proof had added - was settled by experiment:
   lock removed, no delay, 20 of 20 runs failed.
+- **Second review.** The risk "cancelling pending URLs interrupts browser work" missed who
+  else waits on those URLs. A request that joined one of them - a `/crawl` request, another
+  job's URL - took the leader's cancellation as its own answer, 504 `Crawl interrupted`,
+  as it already did when a leader's deadline ran out. Coalescing now keeps a cancellation
+  with the request it belongs to, and whoever joined it goes again within its own deadline.
+  Measured with a job whose result store failed and a `/crawl` request joined to one of its
+  URLs: 20 of 20 such requests failed before, 20 of 20 got their result after.
 - **End to end.** One 2000-URL job in fast mode against a local upstream, 29.7 KB of
   Markdown a page, in the real images: 3.0.0 served its first row after 6.4 seconds and all
   2000 through the documented loop. Container memory grew by 136 MiB against 175 MiB for

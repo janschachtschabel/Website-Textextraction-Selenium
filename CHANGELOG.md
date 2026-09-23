@@ -45,6 +45,24 @@ state-store key. With rows stored under the job's key, `/jobs/abc:row:0` would h
 row as if it were a job record and answered 500. An id is now what `secrets.token_urlsafe`
 produces, `[A-Za-z0-9_-]` up to 64 characters; anything else answers 422.
 
+### Fixed - a request no longer fails because the one it joined was cancelled
+
+Identical requests in flight share one fetch: the first leads, the others join it and take
+its answer. When the leader was cancelled, each request that had joined it failed with 504
+`Crawl interrupted`, although none of them had been cancelled and their own deadlines could
+have minutes left. Until now a leader's own deadline did that. The rows of this release made
+it reach further: a result that cannot be stored cancels the job's pending URLs, so a
+`/crawl` request that had joined one of them failed with the job, and another job that had
+joined one kept a `Crawl interrupted` row for good.
+
+A cancellation now stays with the request it belongs to. A request that joined a cancelled
+leader goes again within its own deadline: it takes the result from the cache, joins a new
+leader or fetches itself. No answer says `Crawl interrupted` any more. A failure is still
+shared - a request that joined one that failed gets the same error without asking the
+upstream again - and a request that is cancelled itself still stops. A test pins each of the
+three, and each fails against the variant it guards: the old behaviour, going again after
+every failure, going again after its own cancellation.
+
 Every new test was also run against its feature broken at the root - results retained, the
 lock removed, delivery moved out of the slot, the page bounded by the saved count - and
 failed each time. [The plan](docs/plans/2026-09-23-job-result-rows.md) records the design,
