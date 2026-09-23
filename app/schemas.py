@@ -400,6 +400,10 @@ def resolve_options(request: CrawlOptions, config: Settings = settings) -> Crawl
         "crawl_rate_limit_rps": config.default_domain_rate_limit_rps,
         "respect_robots_txt": config.respect_robots_txt,
     }
+    if values["js_strategy"] is None and (values["mode"] or config.default_mode) == "auto":
+        # auto renders only a page whose plain HTML lacked the content, and that content arrives
+        # after the page itself: speed reads it too early (PhET, diagrams.net).
+        values["js_strategy"] = "accuracy"
     values.update({name: value for name, value in defaults.items() if values[name] is None})
     # Refused rather than clamped: a bulk job silently cut to a shorter deadline fails on
     # its tail with nothing saying why, while this names the number to ask the operator for.

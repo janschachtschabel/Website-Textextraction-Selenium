@@ -27,6 +27,19 @@ def test_single_and_batch_resolve_same_server_defaults():
     assert single.screenshot is False
 
 
+def test_auto_renders_with_accuracy_unless_the_request_names_a_strategy():
+    speed_by_default = replace(settings, default_mode="auto", default_js_strategy="speed")
+
+    def strategy(**request):
+        return resolve_options(CrawlRequest(url="https://example.com", **request), speed_by_default).js_strategy
+
+    assert strategy() == "accuracy"
+    assert strategy(mode="auto") == "accuracy"
+    assert strategy(mode="auto", js_strategy="speed") == "speed"
+    assert strategy(mode="js") == "speed"
+    assert strategy(mode="fast") == "speed"
+
+
 def test_explicit_false_overrides_global_insecure_ssl():
     custom = replace(settings, allow_insecure_ssl=True)
     assert (
