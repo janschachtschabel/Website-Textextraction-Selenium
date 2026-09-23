@@ -1232,6 +1232,16 @@ above:
   both versions share. diskcache maps each store file with up to 64 MiB and caches up to
   32 MiB per connection, which fits the size but was not measured. The bound on result
   objects rests on the gc test; the container-level claim is open.
+- **Follow-up at 100 URLs.** The same job at 100 URLs, 3.0.0 built from `8236f8b` and
+  2.3.1 as published, with cgroup memory sampled every 100 ms inside the container and
+  split into heap and page cache: 3.0.0 grew by 116.5 MiB and 2.3.1 by 122.7 MiB, all but
+  5 to 8 MiB of it heap in both, so it is not the memory map named above. Most of each
+  2000-URL figure is a cost both versions pay at 100 URLs already. From 100 to 2000 URLs,
+  2.3.1 added about 52 MiB, the Markdown it holds by design (1900 pages at 29.7 KB), and
+  3.0.0 about 20 MiB; whether that part levels off at larger jobs was not measured. The
+  2000-URL runs sampled docker stats every two seconds, so both differences are
+  estimates. The same run read the state store directly: the record expires 3600 seconds
+  after `finished_at`, and all 100 rows within 2 microseconds of it.
 - **Release.** The plan assumed the user's panel pulls `latest`. It deploys the compose
   file from `main`, the route the README describes, and that file names a fixed tag. The
   migration note therefore shows the `v2.3.1` file to point such a panel at, and the
