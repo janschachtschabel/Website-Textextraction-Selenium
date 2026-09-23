@@ -10,6 +10,7 @@ from .config import settings
 from .deadline import Deadline
 from .egress_proxy import EgressProxy
 from .results import CrawlError, FetchResult
+from .security import resolve_target
 from .selenium_driver import create_driver
 
 CAPTURE_MATH = """
@@ -171,6 +172,11 @@ class BrowserFetcher:
                     result = await self.pool.run(
                         selenium_fetch, (url, options, guard.url, deadline.expires_at), deadline
                     )
+                    if web_url(result.final_url):
+                        # Redirects and scripts can move the page; never return one on a prohibited address.
+                        await deadline.run(
+                            asyncio.to_thread(resolve_target, result.final_url, self.config.ssrf_protection)
+                        )
                     if guard.blocked:
                         result.warnings.append(f"Network policy blocked {guard.blocked} browser connection(s)")
                     return result

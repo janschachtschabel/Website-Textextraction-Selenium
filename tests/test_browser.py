@@ -1,11 +1,17 @@
+import asyncio
 import json
 import time
+from dataclasses import replace
+from urllib.parse import urlsplit
 
 import pytest
 
 from app import browser_readiness
 from app.browser_readiness import navigation_status
 from app.config import settings
+from app.deadline import Deadline
+from app.js_fetcher import BrowserFetcher
+from app.results import CrawlError, FetchResult
 from app.schemas import CrawlRequest, resolve_options
 from app.selenium_driver import build_options
 
@@ -28,6 +34,44 @@ def test_browser_respects_request_options_and_has_no_security_bypass():
     assert "--user-agent=IntegrationTest/1" in chrome.arguments
     assert "--disable-web-security" not in chrome.arguments
     assert "--no-sandbox" not in chrome.arguments
+
+
+async def test_browser_result_ending_on_a_prohibited_address_is_rejected(dns):
+    dns["public.example"] = "93.184.216.34"
+    subrequest = b"CONNECT 10.0.0.1:443 HTTP/1.1\r\nHost: 10.0.0.1:443\r\n\r\n"
+
+    class Pool:
+        def __init__(self, final_url, blocked_request=None):
+            self.final_url, self.blocked_request = final_url, blocked_request
+
+        async def run(self, function, args, deadline):
+            if self.blocked_request:
+                # A browser request through this job's guard.
+                reader, writer = await asyncio.open_connection("127.0.0.1", urlsplit(args[2]).port)
+                writer.write(self.blocked_request)
+                await writer.drain()
+                assert (await reader.read()).startswith(b"HTTP/1.1 403")
+                writer.close()
+                await writer.wait_closed()
+            return FetchResult(b"<main>Page</main>", self.final_url, 200, "text/html", "selenium")
+
+    class Rate:
+        async def acquire(self, *args):
+            pass
+
+    def fetch(pool):
+        options = resolve_options(CrawlRequest(url="https://public.example/", mode="js"))
+        fetcher = BrowserFetcher(pool, Rate(), replace(settings, ssrf_protection=True))
+        return fetcher.fetch("https://public.example/", options, Deadline(5))
+
+    kept = await fetch(Pool("https://public.example/article", subrequest))
+    assert kept.warnings == ["Network policy blocked 1 browser connection(s)"]
+    assert (await fetch(Pool("about:blank"))).final_url == "about:blank"
+    # A script navigation that the guard blocked, and a page that bypassed the guard.
+    for pool in (Pool("https://[::1]/", subrequest), Pool("http://127.0.0.1:8767/stats")):
+        with pytest.raises(CrawlError, match="Target blocked by network policy") as blocked:
+            await fetch(pool)
+        assert blocked.value.status_code == 400
 
 
 def test_main_document_status_is_not_overwritten_by_iframe_or_assets():

@@ -491,8 +491,9 @@ interactive consent are outside this anonymous extraction contract.
 Both HTTPX and Chrome use a local egress guard. Each new connection resolves and
 checks its destination and then connects to a validated numeric IP. HTTP redirects
 are also checked before following them. Browser subrequests go through the guard;
-Chrome's implicit loopback proxy bypass and direct QUIC/UDP paths are disabled.
-Only HTTP(S) URLs are accepted. Private, loopback, link-local, site-local, reserved and
+Chrome's implicit loopback proxy bypass and direct QUIC/UDP paths are disabled. A
+rendered page whose final address is prohibited, because a redirect or a script moved
+it there, is an API 400. Only HTTP(S) URLs are accepted. Private, loopback, link-local, site-local, reserved and
 mapped private addresses are denied by default. Keep `SSRF_PROTECTION=true`.
 
 HTTP(S) upstream proxies are supported, including authentication. They must accept
