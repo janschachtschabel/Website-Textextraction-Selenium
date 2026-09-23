@@ -30,6 +30,20 @@ for (const el of document.querySelectorAll('main, article, [role=main]')) {
   if (text === null) text = candidate;
 }
 if (text === null) text = (document.body && document.body.innerText) || '';
+// Web components keep their text in shadow roots, which innerText leaves out. They count only
+// while the light DOM shows nothing, so other pages wait exactly as before.
+const shadowText = root => {
+  let out = '';
+  for (const el of root.querySelectorAll('*')) {
+    if (!el.shadowRoot) continue;
+    for (const child of el.shadowRoot.children) {
+      if (!child.matches('style, script, template, link')) out += ' ' + (child.innerText || '');
+    }
+    out += shadowText(el.shadowRoot);
+  }
+  return out;
+};
+if (!text.trim() && document.body) text = shadowText(document.body);
 const rendered = el => !!(el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
 // A busy region counts while rendered, even while empty. Only indeterminate progressbars are loading
 // indicators: a value (aria-valuenow) marks static progress such as skill bars, and aria-hidden or a

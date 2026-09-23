@@ -85,6 +85,12 @@ async def browser(monkeypatch):
                         "<title>Just a moment...</title><div>Checking your browser</div>"
                         '<script>setTimeout(()=>{document.cookie="cleared=1; path=/";location.reload()},1000)</script>'
                     )
+            elif path == "/shadow":
+                html = (
+                    '<lesson-view></lesson-view><script>customElements.define("lesson-view", class extends HTMLElement '
+                    '{connectedCallback() {this.attachShadow({mode: "open"}).innerHTML = '
+                    '"<style>p {color: navy}</style><p>Lesson text in a shadow root</p>"}})</script>'
+                )
             elif path == "/tall":
                 blocks = "".join(f"<p style='height:200px'>Block {index}</p>" for index in range(20))
                 html = "<main>Long page</main>" + blocks
@@ -188,6 +194,14 @@ async def test_a_bot_challenge_that_lets_the_browser_through_yields_the_page(bro
     result = await fetch("/challenge", seconds=20, js_strategy="speed", js_auto_wait=True)
     assert result.status_code == 200 and b"Article behind the check" in result.data
     assert [path for path, _ in requests].count("/challenge") == 2  # the check, then the page it let through
+
+
+async def test_text_in_a_shadow_root_is_content_the_wait_sees(browser):
+    fetch, _, _ = browser
+    # The deadline is the assertion, as above: a wait blind to shadow roots runs into its
+    # ten second limit and fails the fetch.
+    result = await fetch("/shadow", seconds=8, js_strategy="speed", js_auto_wait=True)
+    assert result.status_code == 200 and result.settled and not result.warnings
 
 
 def self_signed_server_context(directory):
