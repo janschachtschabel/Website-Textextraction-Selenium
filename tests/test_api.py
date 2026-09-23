@@ -222,6 +222,20 @@ async def test_private_proxy_is_rejected_on_every_fetch_path(api):
     assert state["calls"] == 0
 
 
+async def test_error_answers_have_the_shape_docs_describe(api):
+    from app.error_docs import ErrorAnswer, ValidationAnswer
+
+    client, _, resources = api
+    too_long = (resources.config.max_timeout_seconds + 1) * 1000
+    invalid = await client.post("/crawl", json={"url": "ftp://example.com/"})
+    refused = await client.post("/crawl", json={"url": "https://example.com/", "timeout_ms": too_long})
+    unknown = await client.get("/jobs/no-such-job")
+    assert (invalid.status_code, refused.status_code, unknown.status_code) == (422, 422, 404)
+    assert isinstance(ValidationAnswer.model_validate(invalid.json()).detail, list)
+    assert isinstance(ValidationAnswer.model_validate(refused.json()).detail, str)
+    ErrorAnswer.model_validate(unknown.json())
+
+
 async def test_unsettled_rendered_page_is_returned_but_not_a_cached_success(api):
     from app.results import FetchResult
 

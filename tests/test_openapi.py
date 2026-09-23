@@ -73,6 +73,36 @@ def test_every_parameter_says_what_it_is_for():
     assert not undocumented, f"/docs shows these parameters without a word: {undocumented}"
 
 
+# What each route can answer besides success, read from the code: a CrawlError is 502 unless
+# it says otherwise, app/body_limit.py answers 413, admission 422 and 429, the key 401.
+ERRORS = {
+    "GET /": set(),
+    "GET /health": {"503"},
+    "GET /stats": {"401"},
+    "GET /metrics": {"401"},
+    "POST /crawl": {"400", "401", "403", "413", "422", "429", "502", "503", "504"},
+    "POST /crawl/batch": {"401", "413", "422", "429"},
+    "POST /jobs": {"401", "413", "422", "429", "503"},
+    "GET /jobs/{job_id}": {"401", "404", "422"},
+    "GET /jobs/{job_id}/results": {"401", "404", "422"},
+}
+
+
+def test_the_error_table_covers_every_endpoint():
+    published = {f"{verb.upper()} {path}" for path, operations in SCHEMA["paths"].items() for verb in operations}
+    assert published == set(ERRORS)
+
+
+@pytest.mark.parametrize("operation", sorted(ERRORS))
+def test_every_endpoint_names_the_errors_it_can_answer(operation):
+    verb, path = operation.split(" ", 1)
+    responses = SCHEMA["paths"][path][verb.lower()]["responses"]
+    documented = {status for status in responses if not status.startswith("2")}
+    assert documented == ERRORS[operation], f"{operation} documents {sorted(documented)}"
+    vague = sorted(status for status in documented if len(responses[status]["description"]) < 40)
+    assert not vague, f"{operation} does not say when these happen: {vague}"
+
+
 def test_the_service_explains_itself_on_its_front_page():
     assert SCHEMA["info"].get("description"), "/docs opens on the title alone"
 

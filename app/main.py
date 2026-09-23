@@ -19,6 +19,7 @@ from loguru import logger
 from . import __version__
 from .body_limit import BodySizeLimit
 from .config import settings
+from .error_docs import BATCH_REFUSED, NOT_A_JOB_ID, NOT_A_PAGE, STOPPING, TOO_MANY_JOBS, answers
 from .inbound_limit import InboundLimit
 from .logging_setup import setup_logging
 from .prometheus import CONTENT_TYPE_LATEST, render
@@ -176,7 +177,9 @@ def _public_routes(application, config):
         behind it needs one: naming it costs nothing that guessing it does not."""
         return {"service": "Website Text Extraction", "version": __version__, "docs": "/docs"}
 
-    @application.get("/health", summary="Liveness, capacity and browser presence")
+    @application.get(
+        "/health", summary="Liveness, capacity and browser presence", responses={503: {"description": STOPPING}}
+    )
     async def health():
         """Public. Answers 200 while the service accepts work and 503 once it is stopping, and
         reports the capacity in use, the state of both worker pools and whether the configured
@@ -202,7 +205,9 @@ def _public_routes(application, config):
 def _observability_routes(application, check_auth):
     """The same counters twice: as JSON for a person, as text for Prometheus."""
 
-    @application.get("/stats", dependencies=[Security(check_auth)], summary="Counters of the last hour")
+    @application.get(
+        "/stats", dependencies=[Security(check_auth)], summary="Counters of the last hour", responses=answers(401)
+    )
     async def stats():
         """Requests, errors, cache hits, coalesced answers and latency percentiles over a rolling
         60 minutes, with the throughput per minute, the entries in the result cache and the
@@ -213,7 +218,12 @@ def _observability_routes(application, check_auth):
         result["capacity"] = active.service.capacity.stats()
         return result
 
-    @application.get("/metrics", dependencies=[Security(check_auth)], summary="The same counters for Prometheus")
+    @application.get(
+        "/metrics",
+        dependencies=[Security(check_auth)],
+        summary="The same counters for Prometheus",
+        responses=answers(401),
+    )
     async def metrics():
         """The counters of /stats in the Prometheus text format, with gauges for readiness, active
         and waiting URLs, cache entries and worker processes. The gauges describe the worker
@@ -242,7 +252,11 @@ def _crawl_routes(application, config, admit, check_auth):
     """Crawling that answers when it is done; the caller waits."""
 
     @application.post(
-        "/crawl", response_model=CrawlResponse, dependencies=[Security(check_auth)], summary="Crawl one URL"
+        "/crawl",
+        response_model=CrawlResponse,
+        dependencies=[Security(check_auth)],
+        summary="Crawl one URL",
+        responses=answers(400, 401, 403, 413, 422, 429, 502, 503, 504),
     )
     async def crawl(
         request: CrawlRequest = Body(openapi_examples=_choices(CRAWL_EXAMPLE, CRAWL_FULL_EXAMPLE, "just the URL")),
@@ -260,6 +274,7 @@ def _crawl_routes(application, config, admit, check_auth):
         response_model=BatchCrawlResponse,
         dependencies=[Security(check_auth)],
         summary=f"Crawl up to {config.max_urls_per_request} URLs and wait",
+        responses=answers(401, 413, 422, 429, specific={422: BATCH_REFUSED}),
     )
     async def batch(
         request: BatchCrawlRequest = Body(
@@ -299,6 +314,7 @@ def _job_routes(application, config, admit, check_auth):
         response_model=JobAccepted,
         dependencies=[Security(check_auth)],
         summary=f"Submit up to {config.max_urls_per_request} URLs as a background job",
+        responses=answers(401, 413, 422, 429, 503, specific={422: BATCH_REFUSED, 503: TOO_MANY_JOBS}),
     )
     async def submit_job(
         request: BatchCrawlRequest = Body(
@@ -321,7 +337,11 @@ def _job_routes(application, config, admit, check_auth):
         )
 
     @application.get(
-        "/jobs/{job_id}", response_model=JobStatus, dependencies=[Security(check_auth)], summary="Poll a background job"
+        "/jobs/{job_id}",
+        response_model=JobStatus,
+        dependencies=[Security(check_auth)],
+        summary="Poll a background job",
+        responses=answers(401, 404, 422, specific={422: NOT_A_JOB_ID}),
     )
     async def job_status(job_id: JobId):
         """Report how far a job has got, and where its results are.
@@ -341,6 +361,7 @@ def _job_routes(application, config, admit, check_auth):
         response_model=JobResults,
         dependencies=[Security(check_auth)],
         summary="Read a job's results as they finish",
+        responses=answers(401, 404, 422, specific={422: NOT_A_PAGE}),
     )
     async def job_results(
         job_id: JobId,
