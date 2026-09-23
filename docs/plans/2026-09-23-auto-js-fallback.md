@@ -144,13 +144,13 @@ the branch's code mounted. "Usable" means a success with at least 60 words.
   YouTube, the second largest source, gave its footer over HTTP and Google's consent page in
   Chrome - its title, channel and description now come from the data the watch page embeds,
   and auto keeps a page that carries its content as data on HTTP.
-- **The 31 answers that stay weak**, by cause: 9 pages with little text of their own (a video
-  with a short description, Planet-N modules, a Java applet and a chemistry app, edu-sharing
-  pages, a KMap exercise route that shows only a placeholder, a kindOERgarten post); 11 dead
-  links in WLO's index (404s, a deleted domain, two Fobizz materials redirected to the gallery,
-  two BR podcast episodes redirected to the series page, two RPI-Virtuell pages whose firewall
-  answered the crawler with 403 and a browser with 404 - live RPI-Virtuell pages answer the
-  crawler); 7 refused the service's crawler user agent and served
+- **The 31 answers that stay weak**, by cause: 10 pages with little text of their own (a video
+  and a podcast episode with a short description, Planet-N modules, a Java applet and a
+  chemistry app, edu-sharing pages, a KMap exercise route that shows only a placeholder, a
+  kindOERgarten post); 10 dead links in WLO's index (404s, a deleted domain, two Fobizz
+  materials redirected to the gallery, a BR podcast episode redirected to its series page, two
+  RPI-Virtuell pages whose firewall answered the crawler with 403 and a browser with 404 - live
+  RPI-Virtuell pages answer the crawler); 7 refused the service's crawler user agent and served
   a browser one (DiLerTube's 423, OER Commons' 403, LEIFI's Cloudflare challenge, which Chrome
   passes with a browser user agent); 1 Globales Lernen page refused both; 2 Digital Learning Lab
   pages did not answer on port 443 from the test network; 1 video file, skipped by the media

@@ -27,9 +27,14 @@ the crawler user agent. The defaults stay as they are.
 - **The KMap exercise** (`/app/exercise/...`) shows "lala" under its header after 15 s in
   Chrome; its shadow roots hold the navigation only, and it requests nothing but the login state
   and the subject list. There is nothing to extract, in shadow roots or elsewhere.
-- **BR and Fobizz.** Both BR podcast episodes redirect to the series page at ARD Sounds, which
-  lists current episodes, not the linked one; both Fobizz materials redirect to the gallery.
-  Dead links, like the 404s.
+- **BR and Fobizz.** br.de redirected "Längen- und Breitengrade" to its episode at ARD Sounds in
+  all four runs; the extraction keeps what that page says of it in full - its title and a
+  35-word description, the episode itself being audio. Later that evening the same link led to
+  the series page instead. "Dachdecker in Reetdachtechnik" redirects to its series page in the
+  ARD Mediathek, which no longer lists it, and both Fobizz materials redirect to the gallery:
+  dead links, like the 404s. The service follows every redirect and reports it in `redirected`
+  and `final_url`; converting all three pages with markitdown and bs4 adds only navigation,
+  episode lists and the gallery, not the material.
 - **LEIFI's challenge.** With the crawler user agent, Chrome shows "Performing security
   verification" unchanged for 14 s. With a browser user agent the page is through by the time
   `driver.get` returns, after 2.1 s.
