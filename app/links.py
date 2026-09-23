@@ -116,6 +116,15 @@ _NAV_TEXTS = frozenset(
 )
 
 
+def absolute_url(base: str, href: str) -> str | None:
+    """href resolved against base; None when no URL parser accepts it - a template placeholder
+    such as http://[URL] - so that one such link does not cost a page its conversion."""
+    try:
+        return urljoin(base, href)
+    except ValueError:
+        return None
+
+
 def _is_internal(link: str, base_url: str) -> bool:
     try:
         ah = (urlparse(link).hostname or "").lower().removeprefix("www.")
@@ -189,7 +198,9 @@ def extract_links_detailed_from_html(html: str, base_url: str) -> list[dict]:
         if any(rh_lower.startswith(s) for s in _SKIP_SCHEMES):
             continue
 
-        absolute = urljoin(base_url, raw_href)
+        absolute = absolute_url(base_url, raw_href)
+        if absolute is None:
+            continue
 
         # Deduplicate by absolute URL
         if absolute in seen_urls:

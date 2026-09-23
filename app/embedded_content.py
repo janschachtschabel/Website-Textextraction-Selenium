@@ -3,9 +3,11 @@
 import json
 import re
 from html import escape
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
+
+from .links import absolute_url
 
 
 def _nodes(value):
@@ -22,9 +24,13 @@ def _attachment_sections(node, fragment, soup, url) -> str:
     """The historic payload names its files as inline:<file>; point those at the real URL
     and list whatever the body did not already use."""
     base_tag = soup.find("base", href=True)
-    base = urljoin(url or "", base_tag["href"] if base_tag else "./")
+    base = absolute_url(url or "", base_tag["href"] if base_tag else "./") or url or ""
     attachments = [a for a in node.get("attachments", []) if isinstance(a, dict)]
-    targets = {a.get("file"): urljoin(base, a["href"]) for a in attachments if isinstance(a.get("href"), str)}
+    targets = {
+        a.get("file"): target
+        for a in attachments
+        if isinstance(a.get("href"), str) and (target := absolute_url(base, a["href"]))
+    }
     used = set()
     for tag in fragment.select("[href], [src]"):
         for attr in ("href", "src"):

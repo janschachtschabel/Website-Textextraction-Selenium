@@ -76,6 +76,11 @@ def test_empty_and_missing_targets_are_dropped():
     assert extract('<a href="">Leer</a><a>Ohne</a>') == []
 
 
+def test_a_target_no_url_parser_accepts_is_dropped_and_the_rest_listed():
+    links = extract('<a href="http://[URL]">Vorlage</a><a href="/b">Weiter</a>')  # a template placeholder
+    assert [link["url"] for link in links] == ["https://www.example.com/b"]
+
+
 @pytest.mark.parametrize(
     "markup, text",
     [

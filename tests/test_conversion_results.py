@@ -128,6 +128,32 @@ def test_a_file_is_what_links_reports_as_a_download():
     assert document_links(BeautifulSoup(html, "lxml")) == [("Blatt", "https://s.example/blatt.pdf")]
 
 
+def test_a_malformed_link_does_not_cost_the_page_its_text(article_html):
+    links = '<p><a href="http://[URL]">Vorlage</a> und <a href="/files/blatt.pdf">Blatt</a></p>'
+    html = article_html.replace("</main>", links + "</main>")
+    result = convert_document(html.encode(), "text/html", "https://s.example/a")
+    assert result.status == "ok" and "Reflection" in result.markdown
+    assert "https://s.example/files/blatt.pdf" in result.markdown
+
+
+def test_a_malformed_base_leaves_references_relative_to_the_page(article_html):
+    link = '<p><a href="blatt.pdf">Blatt</a></p>'
+    html = '<base href="http://[URL]/">' + article_html.replace("</main>", link + "</main>")
+    result = convert_document(html.encode(), "text/html", "https://s.example/lessons/a")
+    assert "https://s.example/lessons/blatt.pdf" in result.markdown
+
+
+def test_a_malformed_attachment_does_not_cost_the_lesson_its_text():
+    payload = {
+        "title": "Lesson",
+        "description": '<p>The diagram shows the rays. <a href="inline:diagram.pdf">Download</a></p>',
+        "attachments": [{"file": "diagram.pdf", "href": "http://[URL]/diagram.pdf", "name": "Diagram"}],
+    }
+    html = '<script id="embedded-topic" type="json">' + json.dumps(payload) + "</script>"
+    result = convert_document(html.encode(), "text/html", "https://school.example/topic/42")
+    assert "The diagram shows the rays." in result.markdown
+
+
 def test_a_youtube_watch_page_yields_its_title_channel_and_description(youtube_watch_page):
     html = youtube_watch_page("Strukturen erkennen.\nMuster finden.")
     result = convert_document(html.encode(), "text/html; charset=utf-8", "https://www.youtube.com/watch?v=VhCv6MlgWlE")

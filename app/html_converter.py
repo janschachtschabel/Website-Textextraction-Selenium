@@ -4,13 +4,13 @@ import io
 import re
 import threading
 from copy import copy
-from urllib.parse import unquote, urljoin, urlsplit
+from urllib.parse import unquote, urlsplit
 
 from bs4 import BeautifulSoup
 from trafilatura import extract, html2txt
 
 from .embedded_content import embedded_html
-from .links import DOWNLOAD_EXTS
+from .links import DOWNLOAD_EXTS, absolute_url
 from .markup import HIDDEN_STYLE, enhance_table_structure, prepare_html
 from .results import ConversionResult
 
@@ -112,8 +112,8 @@ def with_documents(text: str, documents: list[tuple[str, str]]) -> str:
 
 def _prepared(data: bytes, content_type: str | None, url: str | None, converter: str):
     """The document the converters see: any embedded payload unwrapped, non-content tags
-    gone and every reference absolute. Returns the converter to start from, which an
-    embedded payload may change."""
+    gone and every reference absolute - or gone, when no URL parser accepts it. Returns the
+    converter to start from, which an embedded payload may change."""
     soup = prepare_html(data, content_type)
     embedded = embedded_html(soup, url)
     if embedded:
@@ -125,11 +125,15 @@ def _prepared(data: bytes, content_type: str | None, url: str | None, converter:
     for tag in soup(["script", "style", "noscript", "template"]):
         tag.decompose()
     base_tag = soup.find("base", href=True)
-    base = urljoin(url or "", base_tag["href"] if base_tag else "")
+    base = (absolute_url(url or "", base_tag["href"]) if base_tag else None) or url or ""
     for tag in soup.select("[href], [src]"):
         for attribute in ("href", "src"):
             if tag.get(attribute):
-                tag[attribute] = urljoin(base, tag[attribute])
+                target = absolute_url(base, tag[attribute])
+                if target is None:
+                    del tag[attribute]  # the link's text stays
+                else:
+                    tag[attribute] = target
     return soup, converter
 
 

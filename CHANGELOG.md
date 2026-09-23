@@ -20,6 +20,12 @@ Science in School articles a worksheet and the article as PDF.
   the run's 94 pages no page changed between HTTP and Chrome.
 - The result cache moves to `extraction-v6`.
 
+### Fixed - one malformed link failed the whole page
+
+A link that no URL parser accepts - a template placeholder such as `http://[URL]`, or a
+tutorial's `http://[Server-IP]/` - made the conversion raise, and the service answered 502 for
+the whole page; with `extract_links` too. Such a link is dropped, and its text stays.
+
 ## 3.2.0 - 2026-09-23
 
 Measured on two material pages each from 46 of WLO's largest OER sources, 94 pages in all:
