@@ -35,6 +35,11 @@ def failure_reason(result: CrawlResponse) -> str:
     return "Extraction incomplete"  # e.g. a rendered page that never settled; see warnings
 
 
+class _LeaderCancelled(Exception):
+    """What the requests that joined a cancelled leader get instead of an outcome. They were
+    not cancelled, and their deadlines may have time left, so each goes again on its own."""
+
+
 class CrawlService:
     def __init__(self, resources):
         self.resources = resources
@@ -165,7 +170,10 @@ class CrawlService:
             if cached is not None:
                 return CrawlResponse.model_validate(cached).model_copy(update={"cached": True, "coalesced": False})
         if key in self.inflight and not options.force_refresh:
-            result = await deadline.run(self._joined(key))
+            try:
+                result = await deadline.run(self._joined(key))
+            except _LeaderCancelled:
+                return await self._cached(url, options, deadline)  # still within this request's deadline
             return result.model_copy(deep=True, update={"coalesced": True})
         future = asyncio.get_running_loop().create_future()
         # A leader can fail without followers; retrieve the exception in that case too.
@@ -183,16 +191,17 @@ class CrawlService:
             future.set_result(result)
             return result
         except BaseException as exc:
-            public_error = (
+            # A failure is shared, a cancellation is not: it belongs to this request alone.
+            shared = (
                 exc
                 if isinstance(exc, CrawlError)
                 else (
-                    CrawlError("Crawl interrupted", 504)
+                    _LeaderCancelled()
                     if isinstance(exc, asyncio.CancelledError)
                     else CrawlError("Unexpected extraction failure", 502)
                 )
             )
-            future.set_exception(public_error)
+            future.set_exception(shared)
             raise
         finally:
             if self.inflight.get(key) is future:

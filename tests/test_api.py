@@ -396,6 +396,84 @@ async def test_a_forced_refresh_never_joins_another_request(api):
     assert not resources.service.inflight  # neither request left the other's entry behind
 
 
+async def leader_and_follower(resources, article_html, monkeypatch):
+    """Two crawls of one URL: a leader whose fetch hangs until fail is set and then fails,
+    and a follower, returned once it waits on the leader. Every later fetch answers."""
+    from app.schemas import CrawlRequest, resolve_options
+
+    service = resources.service
+    fetching, joined, fail = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    calls = []
+
+    async def upstream(request):
+        calls.append(request.url.path)
+        if len(calls) == 1:
+            fetching.set()
+            await fail.wait()
+            raise httpx.ConnectError("connection refused", request=request)
+        return httpx.Response(200, content=article_html.encode(), headers={"content-type": "text/html"})
+
+    resources.http.transports = dict.fromkeys((False, True), httpx.MockTransport(upstream))
+    join = service._joined
+
+    async def joining(key):
+        joined.set()
+        return await join(key)
+
+    monkeypatch.setattr(service, "_joined", joining)
+    url = "https://example.com/article"
+    options = resolve_options(CrawlRequest(url=url), resources.config)
+    leader = asyncio.create_task(service.crawl(url, options))
+    await asyncio.wait_for(fetching.wait(), 5)
+    follower = asyncio.create_task(service.crawl(url, options))
+    await asyncio.wait_for(joined.wait(), 5)
+    return leader, follower, calls, fail
+
+
+async def test_a_request_that_joined_a_failed_leader_shares_its_failure(api, article_html, monkeypatch):
+    """A failure is the upstream's answer, so the request that joined the leader gets it too
+    rather than asking the upstream again."""
+    from app.results import CrawlError
+
+    _, _, resources = api
+    leader, follower, calls, fail = await leader_and_follower(resources, article_html, monkeypatch)
+    fail.set()
+    for task in (leader, follower):
+        with pytest.raises(CrawlError, match="HTTP download failed"):
+            await task
+    assert len(calls) == 1
+
+
+async def test_a_request_that_joined_a_cancelled_leader_fetches_on_its_own(api, article_html, monkeypatch):
+    """Unlike a failure, a cancellation is the leader's own: its deadline ran out, or since
+    3.0.0 its job's result store failed and took the job's pending URLs with it. The request
+    that joined it was not cancelled and may have time left, so it must not fail with the
+    leader's cancellation."""
+    _, _, resources = api
+    leader, follower, calls, _ = await leader_and_follower(resources, article_html, monkeypatch)
+    leader.cancel()
+    result = await follower
+    assert result.success and result.coalesced is False
+    assert len(calls) == 2
+    with pytest.raises(asyncio.CancelledError):
+        await leader  # the leader's own cancellation still ends the leader
+    assert not resources.service.inflight
+
+
+async def test_a_request_cancelled_with_its_leader_does_not_fetch_again(api, article_html, monkeypatch):
+    """A follower goes again only because it was not cancelled itself. A job whose result
+    store fails cancels a URL and its repeats together, and none of them may fetch after."""
+    _, _, resources = api
+    leader, follower, calls, _ = await leader_and_follower(resources, article_html, monkeypatch)
+    leader.cancel()
+    follower.cancel()
+    for task in (leader, follower):
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert len(calls) == 1
+    assert not resources.service.inflight
+
+
 @pytest.mark.parametrize(
     "path, body",
     [
