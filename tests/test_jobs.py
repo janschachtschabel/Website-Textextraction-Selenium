@@ -205,6 +205,26 @@ async def test_a_page_reads_every_row_written_although_the_saved_count_trails(jo
     assert len(page["results"]) == 3
 
 
+async def test_a_page_reads_the_record_before_its_rows(jobs_api, monkeypatch):
+    """A job is marked done only after its last row is written, so rows read after a record
+    that says so are complete, and an empty page then means the end. Read the other way
+    round, a job that finished between the two reads would end a client's loop one page
+    early. That takes a race to show; the order of the reads is what prevents it, so the
+    order is what this asserts."""
+    async with jobs_api() as (client, resources):
+        store_rows(resources, "ordered", 2)
+        original = resources.state.get
+        keys = []
+
+        def spy(key, *args, **kwargs):
+            keys.append(key)
+            return original(key, *args, **kwargs)
+
+        monkeypatch.setattr(resources.state, "get", spy)
+        await client.get("/jobs/ordered/results")
+    assert keys[0] == KEY + "ordered", f"rows were read before the record: {keys}"
+
+
 async def test_results_of_an_unknown_job_answer_404(jobs_api):
     async with jobs_api() as (client, _):
         response = await client.get("/jobs/not-a-job/results")
@@ -336,7 +356,10 @@ async def test_a_failing_progress_write_does_not_fail_the_job(jobs_api, monkeypa
 
 async def test_each_url_becomes_a_row_numbered_as_it_finishes(jobs_api, monkeypatch):
     """Rows count up without gaps in the order URLs finish, and each names its URL's place
-    in the request - the only way to tell two identical URLs apart."""
+    in the request - the only way to tell two identical URLs apart. The repeats also make
+    this test see a missing lock: they coalesce onto their first occurrence and finish in
+    the same tick, so two deliveries read the same count. Without the lock it failed 20 of
+    20 runs; with distinct URLs it would depend on timing."""
     async with jobs_api() as (client, resources):
         seen = []
         watch_rows(monkeypatch, resources.jobs, lambda seq, row: seen.append((seq, row["position"])))

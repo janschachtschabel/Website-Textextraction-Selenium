@@ -126,6 +126,7 @@ async def test_auth_protects_crawl_job_stats_and_metrics_routes(tmp_path):
             ]:
                 assert (await client.post(path, json=payload)).status_code == 401
             assert (await client.get("/jobs/any")).status_code == 401
+            assert (await client.get("/jobs/any/results")).status_code == 401
             for path in ("/stats", "/metrics"):
                 assert (await client.get(path)).status_code == 401
                 assert (await client.get(path, headers={"Authorization": "Bearer fixture-key"})).status_code == 200
