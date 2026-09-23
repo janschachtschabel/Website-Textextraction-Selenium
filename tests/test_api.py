@@ -159,6 +159,47 @@ async def test_auto_uses_rendered_result_and_its_success_status(api):
     assert result["fetch_engine"] == "selenium" and "Rendered lesson content" in result["markdown"]
 
 
+async def crawl_public_redirect_to_loopback(tmp_path, article_html, *, protection):
+    requested = []
+
+    def upstream(request):
+        requested.append(str(request.url))
+        if request.url.host == "public.example":
+            return httpx.Response(302, headers={"location": "http://127.0.0.1:8767/stats"})
+        return httpx.Response(200, content=article_html.encode(), headers={"content-type": "text/html"})
+
+    config = replace(
+        settings,
+        result_cache_dir=str(tmp_path),
+        ssrf_protection=protection,
+        conversion_workers=1,
+        default_retries=0,
+        api_key=None,
+        host="127.0.0.1",
+    )
+    # No validate override: the service must apply its configured network policy.
+    resources = Resources(config, transport=httpx.MockTransport(upstream), browser=NoBrowser())
+    app = create_app(config, resources)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post("/crawl", json={"url": "https://public.example/start", "mode": "fast"})
+    return response, requested
+
+
+async def test_redirect_to_internal_address_is_rejected(tmp_path, article_html, dns):
+    dns["public.example"] = "93.184.216.34"
+    response, requested = await crawl_public_redirect_to_loopback(tmp_path, article_html, protection=True)
+    assert (response.status_code, response.json()) == (400, {"detail": "Target blocked by network policy"})
+    assert requested == ["https://public.example/start"]
+
+
+async def test_disabled_protection_follows_internal_redirect(tmp_path, article_html, dns):
+    dns["public.example"] = "93.184.216.34"
+    response, requested = await crawl_public_redirect_to_loopback(tmp_path, article_html, protection=False)
+    assert response.status_code == 200 and response.json()["final_url"] == "http://127.0.0.1:8767/stats"
+    assert requested == ["https://public.example/start", "http://127.0.0.1:8767/stats"]
+
+
 async def test_private_proxy_is_rejected_on_every_fetch_path(api):
     from app.js_fetcher import BrowserFetcher
 

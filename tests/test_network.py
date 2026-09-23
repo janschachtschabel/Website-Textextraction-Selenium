@@ -61,6 +61,55 @@ async def test_http_timeout_is_reported_as_the_expired_deadline(retries):
     await fetcher.close()
 
 
+@pytest.mark.parametrize(
+    "location",
+    [
+        "http://127.0.0.1:8767/stats",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://internal.example/admin",
+        "http://mixed.example/admin",
+        "http://[::ffff:10.0.0.5]/",
+    ],
+)
+async def test_default_policy_blocks_private_redirect_targets_before_requesting_them(dns, location):
+    dns.update(
+        {
+            "public.example": "93.184.216.34",
+            "internal.example": "10.0.0.5",
+            "mixed.example": ["93.184.216.34", "10.0.0.8"],
+        }
+    )
+    calls = []
+
+    def transport(request):
+        calls.append(str(request.url))
+        return httpx.Response(302, headers={"location": location})
+
+    fetcher = HTTPFetcher(transport=httpx.MockTransport(transport))
+    with pytest.raises(CrawlError, match="Target blocked by network policy") as blocked:
+        await fetcher.fetch("https://public.example/redirect", options(), Deadline(5))
+    assert blocked.value.status_code == 400
+    assert calls == ["https://public.example/redirect"]
+    await fetcher.close()
+
+
+async def test_default_policy_follows_public_redirects(dns):
+    dns.update({"public.example": "93.184.216.34", "moved.example": "93.184.216.35"})
+    calls = []
+
+    def transport(request):
+        calls.append(str(request.url))
+        if request.url.host == "public.example":
+            return httpx.Response(302, headers={"location": "https://moved.example/article"})
+        return httpx.Response(200, content=b"<main>Moved</main>", headers={"content-type": "text/html"})
+
+    fetcher = HTTPFetcher(transport=httpx.MockTransport(transport))
+    result = await fetcher.fetch("https://public.example/old", options(), Deadline(5))
+    assert (result.status_code, result.final_url) == (200, "https://moved.example/article")
+    assert calls == ["https://public.example/old", "https://moved.example/article"]
+    await fetcher.close()
+
+
 async def test_redirect_is_checked_before_second_request():
     calls = []
 

@@ -45,7 +45,8 @@ async def browser(monkeypatch):
             head = (await reader.readuntil(b"\r\n\r\n")).decode("latin-1")
             path = head.split(" ")[1]
             requests.append((path, head))
-            status = 404 if path in {"/missing", "/empty-404"} else 200
+            status = {"/missing": 404, "/empty-404": 404, "/redirect": 302}.get(path, 200)
+            location = f"Location: http://127.0.0.1:{port}/private\r\n" if status == 302 else ""
             content_type = "text/html; charset=utf-8"
             if path == "/dynamic":
                 html = '<main id="result" aria-busy="true"></main><script>setTimeout(()=>{let e=document.querySelector("main");e.innerText="DYNAMIC"+"CONTENT ready";e.setAttribute("aria-busy","false")},700)</script>'
@@ -53,6 +54,12 @@ async def browser(monkeypatch):
                 html = '<main>Session page</main><script>document.cookie="private_session=one; path=/"</script>'
             elif path == "/subrequest":
                 html = f'<main>Public content</main><iframe src="http://127.0.0.1:{port}/private"></iframe>'
+            elif path == "/fetch":
+                html = (
+                    f'<main>Script page</main><script>fetch("http://127.0.0.1:{port}/private")'
+                    '.then(r => r.text(), () => "blocked").then(t => {const p = document.createElement("p");'
+                    'p.id = "done"; p.innerText = "FETCH " + t; document.body.append(p)})</script>'
+                )
             elif path == "/hang":
                 html = '<main aria-busy="true">Loading content</main>'
             elif path == "/hidden-loader":
@@ -78,7 +85,7 @@ async def browser(monkeypatch):
                 html = "<main>Page not found</main>" if status == 404 else "<main>Fixture page content</main>"
             data = b"" if path == "/empty-404" else ("<!doctype html><html><body>" + html + "</body></html>").encode()
             writer.write(
-                f"HTTP/1.1 {status} Fixture\r\nContent-Type: {content_type}\r\nContent-Length: {len(data)}\r\nConnection: close\r\n\r\n".encode()
+                f"HTTP/1.1 {status} Fixture\r\n{location}Content-Type: {content_type}\r\nContent-Length: {len(data)}\r\nConnection: close\r\n\r\n".encode()
                 + data
             )
             await writer.drain()
@@ -138,6 +145,16 @@ async def test_profiles_do_not_share_cookies_and_private_subrequests_are_blocked
     assert all("private_session" not in head for path, head in requests if path == "/inspect")
     result = await fetch("/subrequest")
     assert result.status_code == 200
+    assert "/private" not in [path for path, _ in requests]
+
+
+async def test_private_redirects_and_script_requests_are_blocked(browser):
+    fetch, requests, _ = browser
+    redirected = await fetch("/redirect")
+    # The guard answers the refused hop itself.
+    assert redirected.status_code == 403 and redirected.final_url.endswith("/private")
+    scripted = await fetch("/fetch", wait_for_selectors=["#done"])
+    assert scripted.status_code == 200 and b"FETCH blocked" in scripted.data
     assert "/private" not in [path for path, _ in requests]
 
 
