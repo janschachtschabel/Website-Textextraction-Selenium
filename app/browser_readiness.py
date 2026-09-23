@@ -8,11 +8,15 @@ from selenium.common.exceptions import InvalidSelectorException
 from selenium.webdriver.common.by import By
 
 from .deadline import Deadline
+from .preflight import challenge_text
 from .results import CrawlError
 
 # Pages can keep a spinner forever or render no text at all (e.g. a denied download). Auto-wait is
 # best effort: it stops this long after the explicit waits are met instead of waiting for the deadline.
 AUTO_WAIT_LIMIT_SECONDS = {"speed": 10.0, "accuracy": 20.0}
+# A bot challenge such as Cloudflare's reloads into the page once it lets the browser through,
+# within seconds (3.9 s on leifiphysik.de); one that has not by this limit will not.
+CHALLENGE_LIMIT_SECONDS = 10.0
 
 _NET_ERROR = re.compile(r"net::ERR_[A-Z0-9_]+")
 
@@ -94,6 +98,19 @@ def driver_navigation_error(message):
     """
     prefix, _, code = (message or "").partition("\n")[0].strip().partition("unknown error: ")
     return code if not prefix and _NET_ERROR.fullmatch(code) else None
+
+
+def wait_for_challenge(driver, options, deadline: Deadline) -> None:
+    """Let a bot challenge the page shows finish, as any browser does, instead of reading it.
+
+    Whether the site then lets the browser in stays its decision; the wait ends once the title
+    no longer names a challenge or after CHALLENGE_LIMIT_SECONDS.
+    """
+    if not options.js_auto_wait:
+        return
+    limit = time.monotonic() + CHALLENGE_LIMIT_SECONDS
+    while challenge_text(driver.title) and time.monotonic() < limit:
+        time.sleep(min(0.1, deadline.remaining()))
 
 
 def wait_for_content(driver, options, deadline: Deadline) -> bool:

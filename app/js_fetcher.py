@@ -5,7 +5,13 @@ import re
 
 from selenium.common.exceptions import WebDriverException
 
-from .browser_readiness import driver_navigation_error, navigation_error, navigation_status, wait_for_content
+from .browser_readiness import (
+    driver_navigation_error,
+    navigation_error,
+    navigation_status,
+    wait_for_challenge,
+    wait_for_content,
+)
 from .config import settings
 from .deadline import Deadline
 from .egress_proxy import EgressProxy
@@ -107,6 +113,7 @@ def selenium_fetch(url, options, proxy_url, expires_at):
         driver = create_driver(options, proxy_url)
         _configure(driver, options, deadline)
         driver.get(url)
+        wait_for_challenge(driver, options, deadline)
         events = driver.get_log("performance")
         frame = main_frame(driver, events)
         status, mime = navigation_status(events, frame["id"])

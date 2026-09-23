@@ -76,6 +76,15 @@ async def browser(monkeypatch):
                 html = '<h1>Results</h1><div id="list" aria-busy="true"></div><script>setTimeout(()=>{const e=document.getElementById("list");e.innerText="LATE"+"CONTENT arrived";e.removeAttribute("aria-busy")},1500)</script>'
             elif path == "/modal-spinner":
                 html = '<div aria-hidden="true"><main>Page behind a dialog</main><div role="progressbar" style="width:40px;height:40px"></div></div><div role="dialog">Consent</div><script>setTimeout(()=>{document.querySelector("[role=progressbar]").remove();document.querySelector("main").innerText="LATE"+"CONTENT arrived"},1500)</script>'
+            elif path == "/challenge":
+                if "cleared=1" in head:
+                    html = "<main>Article behind the check</main>"
+                else:
+                    status = 403
+                    html = (
+                        "<title>Just a moment...</title><div>Checking your browser</div>"
+                        '<script>setTimeout(()=>{document.cookie="cleared=1; path=/";location.reload()},1000)</script>'
+                    )
             elif path == "/tall":
                 blocks = "".join(f"<p style='height:200px'>Block {index}</p>" for index in range(20))
                 html = "<main>Long page</main>" + blocks
@@ -172,6 +181,13 @@ async def test_content_that_arrives_late_is_still_awaited(browser, path):
     fetch, _, _ = browser
     result = await fetch(path, seconds=20, js_strategy="speed", js_auto_wait=True)
     assert b"LATECONTENT arrived" in result.data and result.settled
+
+
+async def test_a_bot_challenge_that_lets_the_browser_through_yields_the_page(browser):
+    fetch, requests, _ = browser
+    result = await fetch("/challenge", seconds=20, js_strategy="speed", js_auto_wait=True)
+    assert result.status_code == 200 and b"Article behind the check" in result.data
+    assert [path for path, _ in requests].count("/challenge") == 2  # the check, then the page it let through
 
 
 def self_signed_server_context(directory):

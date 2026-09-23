@@ -148,6 +148,40 @@ def test_auto_wait_limit_starts_after_explicit_waits(monkeypatch, explicit):
     assert browser_readiness.wait_for_content(Driver(), options, Deadline(5)) is True
 
 
+class ChallengeDriver:
+    """Fake Chrome whose title names a bot challenge for its first `challenged` reads."""
+
+    def __init__(self, challenged):
+        self.challenged, self.reads = challenged, 0
+
+    @property
+    def title(self):
+        self.reads += 1
+        return "Just a moment..." if self.reads <= self.challenged else "Lesson"
+
+
+def test_a_bot_challenge_is_awaited_until_the_page_moves_on():
+    driver = ChallengeDriver(challenged=3)
+    options = resolve_options(CrawlRequest(url="https://example.com", js_strategy="speed", js_auto_wait=True))
+    browser_readiness.wait_for_challenge(driver, options, Deadline(5))
+    assert driver.reads == 4  # three reads of the challenge, then the page
+
+
+def test_a_challenge_that_never_clears_ends_at_its_limit(monkeypatch):
+    monkeypatch.setattr(browser_readiness, "CHALLENGE_LIMIT_SECONDS", 0.3)
+    options = resolve_options(CrawlRequest(url="https://example.com", js_strategy="accuracy", js_auto_wait=True))
+    started = time.monotonic()
+    browser_readiness.wait_for_challenge(ChallengeDriver(challenged=10**6), options, Deadline(5))
+    assert time.monotonic() - started < 2
+
+
+def test_without_auto_wait_a_challenge_is_read_as_it_is():
+    driver = ChallengeDriver(challenged=10**6)
+    options = resolve_options(CrawlRequest(url="https://example.com", js_auto_wait=False))
+    browser_readiness.wait_for_challenge(driver, options, Deadline(5))
+    assert driver.reads == 0
+
+
 def test_rendered_html_is_bounded_before_webdriver_transfers_it(monkeypatch):
     from app import js_fetcher
     from app.deadline import Deadline
@@ -209,6 +243,8 @@ def log_entry(method, **params):
 
 class NavigationDriver:
     """Fake Chrome whose main frame ends at `frame_url` after navigation."""
+
+    title = "Lesson"
 
     def __init__(self, frame_url, entries):
         self.frame_url, self.entries = frame_url, entries
