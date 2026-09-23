@@ -48,6 +48,7 @@ async def browser(monkeypatch):
             status = {"/missing": 404, "/empty-404": 404, "/redirect": 302}.get(path, 200)
             location = f"Location: http://127.0.0.1:{port}/private\r\n" if status == 302 else ""
             content_type = "text/html; charset=utf-8"
+            body = None  # sent as it is instead of inside the fixture page
             if path == "/dynamic":
                 html = '<main id="result" aria-busy="true"></main><script>setTimeout(()=>{let e=document.querySelector("main");e.innerText="DYNAMIC"+"CONTENT ready";e.setAttribute("aria-busy","false")},700)</script>'
             elif path == "/cookie":
@@ -85,6 +86,24 @@ async def browser(monkeypatch):
                         "<title>Just a moment...</title><div>Checking your browser</div>"
                         '<script>setTimeout(()=>{document.cookie="cleared=1; path=/";location.reload()},1000)</script>'
                     )
+            elif path == "/late-fetch":
+                html = (
+                    "<header>Site header</header><main>Intro text of the page</main>"
+                    '<script>fetch("/slow-data").then(r => r.text()).then(t => '
+                    'document.querySelector("main").insertAdjacentHTML("beforeend", t))</script>'
+                )
+            elif path == "/slow-data":
+                await asyncio.sleep(1.5)
+                html = "<p>LATEDATA arrived</p>"
+            elif path == "/late-script":
+                html = (
+                    "<main>Intro text of the page</main><script>const s = document.createElement('script'); "
+                    "s.src = '/slow-script'; document.head.append(s)</script>"
+                )
+            elif path == "/slow-script":
+                await asyncio.sleep(1.5)
+                content_type = "application/javascript"
+                body = "document.querySelector('main').insertAdjacentHTML('beforeend', '<p>LATESCRIPT arrived</p>')"
             elif path == "/late-main-shadow-header":
                 html = (
                     '<site-header></site-header><main></main><script>customElements.define("site-header", class '
@@ -105,7 +124,12 @@ async def browser(monkeypatch):
                 html, content_type = "<main>Lesson file</main>", "application/octet-stream"  # Chrome downloads it
             else:
                 html = "<main>Page not found</main>" if status == 404 else "<main>Fixture page content</main>"
-            data = b"" if path == "/empty-404" else ("<!doctype html><html><body>" + html + "</body></html>").encode()
+            if body is not None:
+                data = body.encode()
+            elif path == "/empty-404":
+                data = b""
+            else:
+                data = ("<!doctype html><html><body>" + html + "</body></html>").encode()
             writer.write(
                 f"HTTP/1.1 {status} Fixture\r\n{location}Content-Type: {content_type}\r\nContent-Length: {len(data)}\r\nConnection: close\r\n\r\n".encode()
                 + data
@@ -209,6 +233,15 @@ async def test_text_in_a_shadow_root_is_content_the_wait_sees(browser):
     # ten second limit and fails the fetch.
     result = await fetch("/shadow", seconds=8, js_strategy="speed", js_auto_wait=True)
     assert result.status_code == 200 and result.settled and not result.warnings
+
+
+@pytest.mark.parametrize(
+    "path, marker", [("/late-fetch", b"LATEDATA arrived"), ("/late-script", b"LATESCRIPT arrived")]
+)
+async def test_content_a_page_loads_after_loading_is_awaited(browser, path, marker):
+    fetch, _, _ = browser
+    result = await fetch(path, seconds=20, js_strategy="speed", js_auto_wait=True)
+    assert marker in result.data and result.settled
 
 
 def self_signed_server_context(directory):

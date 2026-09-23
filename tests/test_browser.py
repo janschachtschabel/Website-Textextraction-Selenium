@@ -113,10 +113,13 @@ def test_auto_wait_gives_up_on_pages_that_never_settle(monkeypatch, snapshot):
         def find_elements(self, *args):
             return []
 
+        def get_log(self, kind):
+            return []
+
     monkeypatch.setattr(browser_readiness, "AUTO_WAIT_LIMIT_SECONDS", {"speed": 0.3, "accuracy": 0.3})
     options = resolve_options(CrawlRequest(url="https://example.com", js_strategy="speed", js_auto_wait=True))
     started = time.monotonic()
-    assert browser_readiness.wait_for_content(Driver(), options, Deadline(3)) is False
+    assert browser_readiness.wait_for_content(Driver(), options, Deadline(3), []) is False
     assert time.monotonic() - started < 2
 
 
@@ -141,11 +144,64 @@ def test_auto_wait_limit_starts_after_explicit_waits(monkeypatch, explicit):
         def find_elements(self, *args):
             return [Element()] if self.late else []
 
+        def get_log(self, kind):
+            return []
+
     monkeypatch.setattr(browser_readiness, "AUTO_WAIT_LIMIT_SECONDS", {"speed": 0.3, "accuracy": 0.3})
     options = resolve_options(
         CrawlRequest(url="https://example.com", js_strategy="speed", js_auto_wait=True, **explicit)
     )
-    assert browser_readiness.wait_for_content(Driver(), options, Deadline(5)) is True
+    assert browser_readiness.wait_for_content(Driver(), options, Deadline(5), []) is True
+
+
+class DataDriver:
+    """Fake Chrome showing a header at once and a list once its request finished after `late` s."""
+
+    def __init__(self, late, finishes=True, kind="XHR"):
+        self.started, self.late, self.finishes, self.kind = time.monotonic(), late, finishes, kind
+        self.sent = self.done = False
+
+    def get_log(self, kind):
+        entries = []
+        if not self.sent:
+            self.sent = True
+            entries.append(log_entry("Network.requestWillBeSent", requestId="1", type=self.kind))
+        if self.finishes and not self.done and time.monotonic() - self.started >= self.late:
+            self.done = True
+            entries.append(log_entry("Network.loadingFinished", requestId="1"))
+        return entries
+
+    def execute_script(self, script, *args):
+        text = "Header and the list" if self.done else "Header"
+        return {"text": text, "busy": False, "ready": True, "math": True}
+
+    def find_elements(self, *args):
+        return []
+
+
+def speed_wait():
+    return resolve_options(CrawlRequest(url="https://example.com", js_strategy="speed", js_auto_wait=True))
+
+
+@pytest.mark.parametrize("kind", ["XHR", "Fetch", "Script"])
+def test_content_waits_for_the_request_it_depends_on(kind):
+    driver = DataDriver(late=0.6, kind=kind)
+    assert browser_readiness.wait_for_content(driver, speed_wait(), Deadline(5), []) is True
+    assert driver.execute_script("")["text"] == "Header and the list"
+
+
+def test_a_request_that_never_ends_holds_the_wait_only_so_long(monkeypatch):
+    monkeypatch.setattr(browser_readiness, "REQUEST_WAIT_SECONDS", 0.5)
+    started = time.monotonic()
+    assert browser_readiness.wait_for_content(DataDriver(late=0, finishes=False), speed_wait(), Deadline(5), []) is True
+    assert 0.5 <= time.monotonic() - started < 2
+
+
+def test_the_wait_hands_back_the_performance_log_it_read():
+    events = []
+    browser_readiness.wait_for_content(DataDriver(late=0.2), speed_wait(), Deadline(5), events)
+    methods = [json.loads(entry["message"])["message"]["method"] for entry in events]
+    assert methods == ["Network.requestWillBeSent", "Network.loadingFinished"]
 
 
 class ChallengeDriver:

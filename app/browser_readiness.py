@@ -17,6 +17,12 @@ AUTO_WAIT_LIMIT_SECONDS = {"speed": 10.0, "accuracy": 20.0}
 # A bot challenge such as Cloudflare's reloads into the page once it lets the browser through,
 # within seconds (3.9 s on leifiphysik.de); one that has not by this limit will not.
 CHALLENGE_LIMIT_SECONDS = 10.0
+# A running XHR, fetch or script request can still bring content: PhET's list arrived with the last
+# of five XHRs 2.2 s after its page load, and diagrams.net builds its app from scripts it loads
+# after the document. Requests delay readiness only this long after the wait began, so a page that
+# polls or keeps a connection open still settles.
+REQUEST_WAIT_SECONDS = 5.0
+_CONTENT_REQUESTS = ("XHR", "Fetch", "Script")
 
 _NET_ERROR = re.compile(r"net::ERR_[A-Z0-9_]+")
 
@@ -115,6 +121,31 @@ def driver_navigation_error(message):
     return code if not prefix and _NET_ERROR.fullmatch(code) else None
 
 
+class _ContentRequests:
+    """The page's XHR, fetch and script requests still running, from Chrome's performance log."""
+
+    def __init__(self):
+        self.running = set()
+        self.last_change = None
+
+    def observe(self, entries, now):
+        for entry in entries:
+            try:
+                method, params = _message(entry)
+                if method == "Network.requestWillBeSent" and params.get("type") in _CONTENT_REQUESTS:
+                    self.running.add(params["requestId"])
+                    self.last_change = now
+                elif method in ("Network.loadingFinished", "Network.loadingFailed"):
+                    if params.get("requestId") in self.running:
+                        self.running.discard(params["requestId"])
+                        self.last_change = now
+            except (ValueError, KeyError, TypeError):
+                continue  # Chrome also emits unrelated/non-network log records.
+
+    def quiet(self, now, stable_for):
+        return not self.running and (self.last_change is None or now - self.last_change >= stable_for)
+
+
 def wait_for_challenge(driver, options, deadline: Deadline) -> None:
     """Let a bot challenge the page shows finish, as any browser does, instead of reading it.
 
@@ -128,15 +159,19 @@ def wait_for_challenge(driver, options, deadline: Deadline) -> None:
         time.sleep(min(0.1, deadline.remaining()))
 
 
-def wait_for_content(driver, options, deadline: Deadline) -> bool:
+def wait_for_content(driver, options, deadline: Deadline, events: list) -> bool:
     """Wait for selectors, the minimum wait and (optionally) settled content.
 
     Returns False when auto-wait gave up on content that never settled. Its limit starts once the
-    selectors and the minimum wait are satisfied.
+    selectors and the minimum wait are satisfied. Settled content also wants the page's requests
+    for data and scripts done, for REQUEST_WAIT_SECONDS at most. `events` holds the performance log read so far;
+    the entries this wait reads are appended to it, since the page's status is read from them.
     """
     if not (options.js_auto_wait or options.wait_for_selectors or options.wait_for_ms):
         return True
     started = time.monotonic()
+    requests = _ContentRequests()
+    requests.observe(events, started)
     changed = started
     previous = None
     explicit_since = None
@@ -144,6 +179,9 @@ def wait_for_content(driver, options, deadline: Deadline) -> bool:
     auto_wait_limit = AUTO_WAIT_LIMIT_SECONDS[options.js_strategy]
     while True:
         remaining = deadline.remaining()
+        entries = driver.get_log("performance")
+        events.extend(entries)
+        requests.observe(entries, time.monotonic())
         snapshot = driver.execute_script(SNAPSHOT)
         try:
             selected = all(
@@ -164,6 +202,7 @@ def wait_for_content(driver, options, deadline: Deadline) -> bool:
             and not snapshot["busy"]
             and snapshot["math"]
             and now - changed >= stable_for
+            and (requests.quiet(now, stable_for) or now - started >= REQUEST_WAIT_SECONDS)
         )
         if not (selected and minimum):
             explicit_since = None

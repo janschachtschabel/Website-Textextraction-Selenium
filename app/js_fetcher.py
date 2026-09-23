@@ -119,7 +119,7 @@ def selenium_fetch(url, options, proxy_url, expires_at):
         status, mime = navigation_status(events, frame["id"])
         settled = True
         if web_url(frame["url"]) and (status is None or status < 400):
-            settled = wait_for_content(driver, options, deadline)
+            settled = wait_for_content(driver, options, deadline, events)
         events.extend(driver.get_log("performance"))
         frame = main_frame(driver, events)
         status, mime = navigation_status(events, frame["id"])
