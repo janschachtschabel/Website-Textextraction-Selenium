@@ -81,7 +81,9 @@ def _configure(driver, options, deadline):
     """Bound the browser before it loads anything: deadlines, no local schemes, no downloads.
 
     The speed strategy also drops images, fonts and media, which it can only do when no
-    screenshot is wanted - a picture of a page without its images is worth little.
+    screenshot is wanted - a picture of a page without its images is worth little. Images are
+    switched off in Chrome itself (see build_options), not blocked by URL: a blocked image request
+    fails in the page, and kindoergarten.wordpress.com crashed its tab a few seconds after that.
     """
     driver.set_page_load_timeout(deadline.remaining())
     driver.set_script_timeout(min(10, deadline.remaining()))
@@ -90,7 +92,7 @@ def _configure(driver, options, deadline):
     driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": blocked})
     driver.execute_cdp_cmd("Browser.setDownloadBehavior", {"behavior": "deny"})
     if options.js_strategy == "speed" and not options.screenshot:
-        heavy = ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.woff", "*.woff2", "*.mp4", "*.mp3"]
+        heavy = ["*.woff", "*.woff2", "*.mp4", "*.mp3"]
         driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": blocked + heavy})
 
 

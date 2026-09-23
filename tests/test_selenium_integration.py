@@ -1,6 +1,7 @@
 """Real browser gates, using only a locally controlled fixture origin."""
 
 import asyncio
+import base64
 import os
 import ssl
 import time
@@ -22,6 +23,9 @@ pytestmark = [
     pytest.mark.selenium,
     pytest.mark.skipif(os.getenv("RUN_SELENIUM_TESTS") != "1", reason="Opt-in real Chrome integration"),
 ]
+
+
+ONE_PIXEL_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 
 
 def fixture_fetch(*args):
@@ -104,6 +108,14 @@ async def browser(monkeypatch):
                 await asyncio.sleep(1.5)
                 content_type = "application/javascript"
                 body = "document.querySelector('main').insertAdjacentHTML('beforeend', '<p>LATESCRIPT arrived</p>')"
+            elif path == "/image-error":
+                html = (
+                    '<main>Page with a picture</main><img src="/picture.png" alt="" '
+                    "onerror=\"document.querySelector('main').dataset.imageFailed = 'yes'\">"
+                )
+            elif path == "/picture.png":
+                content_type = "image/png"
+                body = base64.b64decode(ONE_PIXEL_PNG)
             elif path == "/late-main-shadow-header":
                 html = (
                     '<site-header></site-header><main></main><script>customElements.define("site-header", class '
@@ -125,7 +137,7 @@ async def browser(monkeypatch):
             else:
                 html = "<main>Page not found</main>" if status == 404 else "<main>Fixture page content</main>"
             if body is not None:
-                data = body.encode()
+                data = body.encode() if isinstance(body, str) else body
             elif path == "/empty-404":
                 data = b""
             else:
@@ -242,6 +254,15 @@ async def test_content_a_page_loads_after_loading_is_awaited(browser, path, mark
     fetch, _, _ = browser
     result = await fetch(path, seconds=20, js_strategy="speed", js_auto_wait=True)
     assert marker in result.data and result.settled
+
+
+async def test_speed_lets_no_image_request_of_the_page_fail(browser):
+    fetch, _, _ = browser
+    # Image requests blocked by URL fail in the page; kindoergarten.wordpress.com crashed its tab
+    # a few seconds after that.
+    result = await fetch("/image-error", seconds=20, js_strategy="speed", js_auto_wait=True)
+    assert result.status_code == 200 and b"Page with a picture" in result.data
+    assert b"data-image-failed" not in result.data
 
 
 def self_signed_server_context(directory):

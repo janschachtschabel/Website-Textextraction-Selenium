@@ -49,6 +49,8 @@ def build_options(request: CrawlOptions, proxy_url: str, config: Settings = sett
         options.binary_location = config.chrome_binary
     if request.headless:
         options.add_argument("--headless=new")
+    if request.js_strategy == "speed" and not request.screenshot:
+        options.add_argument("--blink-settings=imagesEnabled=false")  # why not by URL: js_fetcher._configure
     if config.selenium_no_sandbox:
         options.add_argument("--no-sandbox")  # Explicit opt-in for environments that cannot provide a sandbox.
     for argument in [

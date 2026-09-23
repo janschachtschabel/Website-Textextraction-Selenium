@@ -36,6 +36,38 @@ def test_browser_respects_request_options_and_has_no_security_bypass():
     assert "--no-sandbox" not in chrome.arguments
 
 
+@pytest.mark.parametrize(
+    "strategy, screenshot, images_off", [("speed", False, True), ("speed", True, False), ("accuracy", False, False)]
+)
+def test_speed_switches_images_off_in_chrome_instead_of_blocking_their_requests(strategy, screenshot, images_off):
+    request = resolve_options(CrawlRequest(url="https://example.com", js_strategy=strategy, screenshot=screenshot))
+    chrome = build_options(request, "http://127.0.0.1:1234", settings)
+    assert ("--blink-settings=imagesEnabled=false" in chrome.arguments) is images_off
+
+
+def test_speed_blocks_font_and_media_requests_but_no_image_request():
+    from app import js_fetcher
+
+    calls = []
+
+    class Driver:
+        def set_page_load_timeout(self, value):
+            pass
+
+        def set_script_timeout(self, value):
+            pass
+
+        def execute_cdp_cmd(self, method, params):
+            calls.append((method, params))
+
+    js_fetcher._configure(
+        Driver(), resolve_options(CrawlRequest(url="https://example.com", js_strategy="speed")), Deadline(5)
+    )
+    blocked = [params["urls"] for method, params in calls if method == "Network.setBlockedURLs"][-1]
+    assert "*.woff2" in blocked and "*.mp4" in blocked
+    assert not {"*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"} & set(blocked)
+
+
 async def test_browser_result_ending_on_a_prohibited_address_is_rejected(dns):
     dns["public.example"] = "93.184.216.34"
     subrequest = b"CONNECT 10.0.0.1:443 HTTP/1.1\r\nHost: 10.0.0.1:443\r\n\r\n"
