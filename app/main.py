@@ -8,6 +8,7 @@ what it needs rather than closing over everything the factory happens to have.
 import math
 import secrets
 from contextlib import asynccontextmanager
+from typing import Annotated
 
 from fastapi import Body, FastAPI, HTTPException, Path, Security
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
@@ -276,6 +277,11 @@ def _crawl_routes(application, config, admit, check_auth):
         )
 
 
+# The id becomes part of a state-store key, so it may only be what token_urlsafe produces:
+# with a colon it could address a result row as if it were a job record.
+JobId = Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
+
+
 def _job_routes(application, config, admit, check_auth):
     """The same crawling, delivered by a job id instead of a held-open connection."""
 
@@ -306,7 +312,7 @@ def _job_routes(application, config, admit, check_auth):
     @application.get(
         "/jobs/{job_id}", response_model=JobStatus, dependencies=[Security(check_auth)], summary="Poll a background job"
     )
-    async def job_status(job_id: str = Path(max_length=64)):
+    async def job_status(job_id: JobId):
         """Report a submitted batch, and carry the result once it is done.
 
         Answers 404 when the id is unknown or its record has expired."""

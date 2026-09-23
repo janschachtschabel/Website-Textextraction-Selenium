@@ -93,6 +93,14 @@ async def test_unknown_jobs_answer_404(jobs_api):
         assert response.status_code == 404 and response.json()["detail"] == "Unknown or expired job"
 
 
+@pytest.mark.parametrize("path", ["/jobs/abc:row:0"])
+async def test_a_job_id_is_only_what_the_service_hands_out(jobs_api, path):
+    """The id becomes part of a store key. One with a colon could name a key that is not a
+    job record - a result row, once rows exist - so it is refused at the door."""
+    async with jobs_api() as (client, _):
+        assert (await client.get(path)).status_code == 422
+
+
 async def test_active_jobs_are_bounded_per_process(jobs_api):
     async with jobs_api(delay=3, max_active_jobs=1) as (client, _):
         first = await client.post("/jobs", json={"urls": ["https://example.com/one"], "mode": "fast"})
