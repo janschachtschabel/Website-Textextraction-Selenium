@@ -3,7 +3,11 @@
 Versions describe the request/response contract and the operational defaults, not
 the internal structure. Dates are release dates of this repository.
 
-## Unreleased
+## 3.2.0 - 2026-09-23
+
+Measured on two material pages each from 46 of WLO's largest OER sources, 94 pages in all:
+`auto` answers 63 of them with their content instead of 53, and `speed` and `accuracy` give
+the same text on 46 of the 49 pages where JavaScript matters.
 
 ### Fixed - auto renders the pages the plain HTML does not give
 

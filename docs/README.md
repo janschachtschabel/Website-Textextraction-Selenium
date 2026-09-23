@@ -38,6 +38,8 @@ Two kinds of entry are worth knowing about before reading them:
   storing each job result as a row (3.0.0), with the two decisions it rests on.
 - [plans/2026-09-23-image-anonymization-and-media.md](plans/2026-09-23-image-anonymization-and-media.md) -
   the plan for anonymization and media metadata in the published image (3.1.0).
+- [plans/2026-09-23-auto-js-fallback.md](plans/2026-09-23-auto-js-fallback.md) - the plan for
+  auto's fallback to Chrome, the waits, and the run over WLO's largest sources (3.2.0).
 
 ## Where the other answers live
 
