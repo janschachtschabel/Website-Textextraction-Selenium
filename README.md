@@ -488,13 +488,20 @@ interactive consent are outside this anonymous extraction contract.
 
 ## Network policy and capacity
 
-Both HTTPX and Chrome use a local egress guard. Each new connection resolves and
-checks its destination and then connects to a validated numeric IP. HTTP redirects
-are also checked before following them. Browser subrequests go through the guard;
-Chrome's implicit loopback proxy bypass and direct QUIC/UDP paths are disabled. A
-rendered page whose final address is prohibited, because a redirect or a script moved
-it there, is an API 400. Only HTTP(S) URLs are accepted. Private, loopback, link-local, site-local, reserved and
-mapped private addresses are denied by default. Keep `SSRF_PROTECTION=true`.
+Both HTTPX and Chrome use a local egress guard. Each new connection resolves its
+destination, requires every DNS answer to be public and then connects to that validated
+numeric IP, so a later DNS answer cannot change the address. HTTPX checks each redirect
+before requesting it; a prohibited hop is an API 400 `Target blocked by network policy`.
+Chrome's redirects, subrequests and page scripts go through the same guard, and
+`warnings` counts the browser connections it refused. Chrome's implicit loopback proxy
+bypass and direct QUIC/UDP paths are disabled. A rendered page whose final address is
+prohibited, because a redirect or a script moved it there, is an API 400.
+
+Only HTTP(S) URLs are accepted. By default, private, loopback, link-local, site-local,
+shared (CGNAT), reserved, multicast and unspecified addresses are denied, as are their
+IPv4-mapped forms and 6to4, Teredo and NAT64 (`64:ff9b::/96`) addresses, which can carry
+a private IPv4 destination. Keep `SSRF_PROTECTION=true`: `false` turns off only this
+address check, for trusted networks; a host must still resolve.
 
 HTTP(S) upstream proxies are supported, including authentication. They must accept
 CONNECT requests to numeric destinations; this prevents a second target DNS lookup
