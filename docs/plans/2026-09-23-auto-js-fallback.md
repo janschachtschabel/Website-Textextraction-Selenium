@@ -144,12 +144,15 @@ the branch's code mounted. "Usable" means a success with at least 60 words.
   Chrome - its title, channel and description now come from the data the watch page embeds,
   and auto keeps a page that carries its content as data on HTTP.
 - **The 31 answers that stay weak**, by cause: 11 pages with little text of their own (podcast
-  and video pages, apps and simulations, a KMap exercise built in shadow roots); 10 refused
-  the service's crawler user agent (RPI-Virtuell's NinjaFirewall, DiLerTube's 423, OER
-  Commons' 403, one Globales Lernen page, LEIFI's Cloudflare) - OER Commons and DiLerTube
-  served a browser user agent; 7 dead links in WLO's index (404, a deleted domain, a Fobizz
-  material redirected to its gallery); 2 Digital Learning Lab pages did not answer on port
-  443 from the test network; 1 video file, skipped by the media policy.
+  and video pages, apps and simulations, a KMap exercise built in shadow roots); 9 dead links in
+  WLO's index (404s, a deleted domain, two Fobizz materials redirected to the gallery, two
+  RPI-Virtuell pages whose firewall answered the crawler with 403 and a browser with 404 - live
+  RPI-Virtuell pages answer the crawler); 7 refused the service's crawler user agent and served
+  a browser one (DiLerTube's 423, OER Commons' 403, LEIFI's Cloudflare challenge, which Chrome
+  passes with a browser user agent); 1 Globales Lernen page refused both; 2 Digital Learning Lab
+  pages did not answer on port 443 from the test network; 1 video file, skipped by the media
+  policy. With a browser user agent auto answered 69 pages usefully instead of 63, but
+  kindoergarten.wordpress.com refused the stale `Chrome/127` string with 403.
 - **Time**: fast median 1.0 s; auto median 0.9 s where HTTP sufficed (63 pages) and 9.3 s where
   it rendered (28 pages, 90 % within 15.2 s).
 
